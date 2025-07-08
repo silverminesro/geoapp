@@ -1,19 +1,22 @@
 package main
 
 import (
+	"time"
+
 	"geoapp/internal/auth"
+	"geoapp/internal/common"
 	"geoapp/internal/game"
 	"geoapp/internal/location"
 	"geoapp/internal/user"
 	"geoapp/pkg/middleware"
 
 	"github.com/gin-gonic/gin"
-	redis_client "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-func setupRoutes(db *gorm.DB, redisClient *redis_client.Client) *gin.Engine {
-	// Nastav Gin mode
+// ✅ FIXED: Changed signature to match main.go call (removed redis parameter)
+func setupRoutes(db *gorm.DB) *gin.Engine {
+	// Set Gin mode
 	gin.SetMode(gin.ReleaseMode) // Pre production
 
 	router := gin.New()
@@ -22,27 +25,154 @@ func setupRoutes(db *gorm.DB, redisClient *redis_client.Client) *gin.Engine {
 	router.Use(middleware.Logger())
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
-	router.Use(middleware.RateLimit(redisClient))
+	// ❌ Commented out for now: router.Use(middleware.RateLimit(redisClient))
 
-	// Initialize handlers
-	authHandler := auth.NewHandler(db, redisClient)
-	userHandler := user.NewHandler(db, redisClient)
-	gameHandler := game.NewHandler(db, redisClient)
-	locationHandler := location.NewHandler(db, redisClient)
+	// ✅ FIXED: Initialize handlers without Redis (pass nil for now)
+	authHandler := auth.NewHandler(db, nil)         // nil instead of redisClient
+	userHandler := user.NewHandler(db, nil)         // nil instead of redisClient
+	gameHandler := game.NewHandler(db, nil)         // nil instead of redisClient
+	locationHandler := location.NewHandler(db, nil) // nil instead of redisClient
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":     "healthy",
-			"timestamp":  "2025-07-06 14:01:46",
+			"timestamp":  time.Now().Format(time.RFC3339),
 			"version":    "1.0.0",
 			"service":    "geoapp-backend",
 			"created_by": "silverminesro",
 		})
 	})
 
+	// Basic info endpoint (merge from main.go)
+	router.GET("/info", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"name":        "GeoApp Backend",
+			"version":     "1.0.0",
+			"environment": getEnvVar("APP_ENV", "development"),
+			"uptime":      time.Since(startTime).String(),
+			"developer":   "silverminesro",
+			"database":    getEnvVar("DB_NAME", "geoapp") + "@" + getEnvVar("DB_HOST", "localhost"),
+		})
+	})
+
 	// API v1 group
-	v1 := router.Group("/api/v1")
+	v1 := router.Group("/api/" + getEnvVar("API_VERSION", "v1"))
+	{
+		// Basic test endpoints (merge from main.go)
+		v1.GET("/test", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"message":   "🎮 GeoApp API is working perfectly!",
+				"time":      time.Now().Format(time.RFC3339),
+				"endpoint":  "/api/v1/test",
+				"developer": "silverminesro",
+				"status":    "operational",
+			})
+		})
+
+		// Database test endpoint (merge from main.go)
+		v1.GET("/db-test", func(c *gin.Context) {
+			var tierCount int64
+			var levelCount int64
+			var userCount int64
+			var zoneCount int64
+
+			// Query existing data
+			db.Raw("SELECT COUNT(*) FROM tier_definitions").Scan(&tierCount)
+			db.Raw("SELECT COUNT(*) FROM level_definitions").Scan(&levelCount)
+			db.Model(&common.User{}).Count(&userCount)
+			db.Model(&common.Zone{}).Count(&zoneCount)
+
+			c.JSON(200, gin.H{
+				"database": "connected",
+				"status":   "operational",
+				"stats": gin.H{
+					"tiers":  tierCount,
+					"levels": levelCount,
+					"users":  userCount,
+					"zones":  zoneCount,
+				},
+				"message":   "Database connection successful! 🎯",
+				"timestamp": time.Now().Format(time.RFC3339),
+			})
+		})
+
+		// User test endpoint (merge from main.go)
+		v1.GET("/users", func(c *gin.Context) {
+			var users []common.User
+			result := db.Limit(10).Find(&users)
+
+			if result.Error != nil {
+				c.JSON(500, gin.H{
+					"error":   "Failed to query users",
+					"message": result.Error.Error(),
+				})
+				return
+			}
+
+			c.JSON(200, gin.H{
+				"users":     users,
+				"count":     len(users),
+				"total":     result.RowsAffected,
+				"message":   "Users retrieved successfully",
+				"timestamp": time.Now().Format(time.RFC3339),
+			})
+		})
+
+		// Zone test endpoint (merge from main.go)
+		v1.GET("/zones", func(c *gin.Context) {
+			var zones []common.Zone
+			result := db.Limit(10).Find(&zones)
+
+			if result.Error != nil {
+				c.JSON(500, gin.H{
+					"error":   "Failed to query zones",
+					"message": result.Error.Error(),
+				})
+				return
+			}
+
+			c.JSON(200, gin.H{
+				"zones":     zones,
+				"count":     len(zones),
+				"total":     result.RowsAffected,
+				"message":   "Zones retrieved successfully",
+				"timestamp": time.Now().Format(time.RFC3339),
+			})
+		})
+
+		// Server status endpoint (merge from main.go)
+		v1.GET("/status", func(c *gin.Context) {
+			// Quick database ping
+			sqlDB, err := db.DB()
+			var dbStatus string
+			if err != nil {
+				dbStatus = "error"
+			} else {
+				if err := sqlDB.Ping(); err != nil {
+					dbStatus = "disconnected"
+				} else {
+					dbStatus = "connected"
+				}
+			}
+
+			c.JSON(200, gin.H{
+				"server": gin.H{
+					"status":      "running",
+					"uptime":      time.Since(startTime).String(),
+					"environment": getEnvVar("APP_ENV", "development"),
+					"version":     "1.0.0",
+				},
+				"database": gin.H{
+					"status": dbStatus,
+					"host":   getEnvVar("DB_HOST", "localhost"),
+					"name":   getEnvVar("DB_NAME", "geoapp"),
+				},
+				"developer": "silverminesro",
+				"timestamp": time.Now().Format(time.RFC3339),
+			})
+		})
+	}
 
 	// ==========================================
 	// 🔐 AUTH ROUTES (Public - no JWT required)
@@ -188,9 +318,9 @@ func setupRoutes(db *gorm.DB, redisClient *redis_client.Client) *gin.Engine {
 		systemRoutes.GET("/health", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"status":    "healthy",
-				"timestamp": "2025-07-06 14:01:46",
+				"timestamp": time.Now().Format(time.RFC3339),
 				"database":  "connected",
-				"redis":     "connected",
+				"redis":     "disabled",
 				"version":   "1.0.0",
 			})
 		})

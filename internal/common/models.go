@@ -37,20 +37,6 @@ type BaseModel struct {
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// User model
-type User struct {
-	BaseModel
-	Username     string    `json:"username" gorm:"uniqueIndex;not null;size:50"`
-	Email        string    `json:"email" gorm:"uniqueIndex;not null;size:100"`
-	PasswordHash string    `json:"-" gorm:"not null;size:255"`
-	Tier         int       `json:"tier" gorm:"default:1"`
-	LastLocation *Location `json:"last_location,omitempty" gorm:"embedded;embeddedPrefix:last_location_"`
-	IsActive     bool      `json:"is_active" gorm:"default:true"`
-
-	// Relationships
-	Inventory []InventoryItem `json:"inventory,omitempty" gorm:"foreignKey:UserID"`
-}
-
 // Location embedded struct
 type Location struct {
 	Latitude  float64   `json:"latitude" gorm:"type:decimal(10,8)"`
@@ -59,14 +45,30 @@ type Location struct {
 	Timestamp time.Time `json:"timestamp" gorm:"autoUpdateTime"`
 }
 
+// ✅ OPRAVENÝ User model - bez LastLocation (pridáme neskôr)
+type User struct {
+	BaseModel
+	Username     string `json:"username" gorm:"uniqueIndex;not null;size:50"`
+	Email        string `json:"email" gorm:"uniqueIndex;not null;size:100"`
+	PasswordHash string `json:"-" gorm:"not null;size:255"`
+	Tier         int    `json:"tier" gorm:"default:1"`
+	IsActive     bool   `json:"is_active" gorm:"default:true"`
+
+	// Relationships
+	Inventory []InventoryItem `json:"inventory,omitempty" gorm:"foreignKey:UserID"`
+}
+
 // Zone model
 type Zone struct {
 	BaseModel
 	Name         string   `json:"name" gorm:"not null;size:100"`
+	Description  string   `json:"description,omitempty" gorm:"type:text"`
 	TierRequired int      `json:"tier_required" gorm:"not null"`
 	Location     Location `json:"location" gorm:"embedded;embeddedPrefix:location_"`
 	RadiusMeters int      `json:"radius_meters" gorm:"not null"`
 	IsActive     bool     `json:"is_active" gorm:"default:true"`
+	ZoneType     string   `json:"zone_type" gorm:"not null;default:'static'"`
+	Properties   JSONB    `json:"properties,omitempty" gorm:"type:jsonb"`
 
 	// Relationships
 	Artifacts []Artifact `json:"artifacts,omitempty" gorm:"foreignKey:ZoneID"`

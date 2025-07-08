@@ -9,7 +9,6 @@ import (
 
 	"geoapp/internal/common"
 
-	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -68,7 +67,7 @@ func main() {
 	// Skip Redis for now
 	log.Println("⚠️  Redis disabled for testing - focusing on database")
 
-	// Setup routes
+	// Setup routes - FIXED: Only call, no definition here
 	router := setupRoutes(db)
 
 	// Get server configuration from .env
@@ -110,162 +109,7 @@ func initDB() (*gorm.DB, error) {
 	return db, nil
 }
 
-func setupRoutes(db *gorm.DB) *gin.Engine {
-	// Set Gin mode
-	if getEnvVar("GIN_MODE", "debug") == "release" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
-	router := gin.Default()
-
-	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status":    "healthy",
-			"database":  "connected",
-			"version":   getEnvVar("API_VERSION", "v1"),
-			"timestamp": time.Now().Format(time.RFC3339),
-			"uptime":    time.Since(startTime).String(),
-			"developer": "silverminesro",
-		})
-	})
-
-	// Basic info endpoint
-	router.GET("/info", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"name":        "GeoApp Backend",
-			"version":     "1.0.0",
-			"environment": getEnvVar("APP_ENV", "development"),
-			"uptime":      time.Since(startTime).String(),
-			"developer":   "silverminesro",
-			"database":    fmt.Sprintf("%s@%s", getEnvVar("DB_NAME", "geoapp"), getEnvVar("DB_HOST", "localhost")),
-		})
-	})
-
-	// API routes group
-	api := router.Group("/api/" + getEnvVar("API_VERSION", "v1"))
-	{
-		// Basic test endpoints
-		api.GET("/test", func(c *gin.Context) {
-			c.JSON(200, gin.H{
-				"message":   "🎮 GeoApp API is working perfectly!",
-				"time":      time.Now().Format(time.RFC3339),
-				"endpoint":  "/api/v1/test",
-				"developer": "silverminesro",
-				"status":    "operational",
-			})
-		})
-
-		// Database test endpoint
-		api.GET("/db-test", func(c *gin.Context) {
-			var tierCount int64
-			var levelCount int64
-			var userCount int64
-			var zoneCount int64
-
-			// Query existing data
-			db.Raw("SELECT COUNT(*) FROM tier_definitions").Scan(&tierCount)
-			db.Raw("SELECT COUNT(*) FROM level_definitions").Scan(&levelCount)
-			db.Model(&common.User{}).Count(&userCount)
-			db.Model(&common.Zone{}).Count(&zoneCount)
-
-			c.JSON(200, gin.H{
-				"database": "connected",
-				"status":   "operational",
-				"stats": gin.H{
-					"tiers":  tierCount,
-					"levels": levelCount,
-					"users":  userCount,
-					"zones":  zoneCount,
-				},
-				"message":   "Database connection successful! 🎯",
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		})
-
-		// User test endpoint
-		api.GET("/users", func(c *gin.Context) {
-			var users []common.User
-			result := db.Limit(10).Find(&users)
-
-			if result.Error != nil {
-				c.JSON(500, gin.H{
-					"error":   "Failed to query users",
-					"message": result.Error.Error(),
-				})
-				return
-			}
-
-			c.JSON(200, gin.H{
-				"users":     users,
-				"count":     len(users),
-				"total":     result.RowsAffected,
-				"message":   "Users retrieved successfully",
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		})
-
-		// Zone test endpoint
-		api.GET("/zones", func(c *gin.Context) {
-			var zones []common.Zone
-			result := db.Limit(10).Find(&zones)
-
-			if result.Error != nil {
-				c.JSON(500, gin.H{
-					"error":   "Failed to query zones",
-					"message": result.Error.Error(),
-				})
-				return
-			}
-
-			c.JSON(200, gin.H{
-				"zones":     zones,
-				"count":     len(zones),
-				"total":     result.RowsAffected,
-				"message":   "Zones retrieved successfully",
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		})
-
-		// Server status endpoint
-		api.GET("/status", func(c *gin.Context) {
-			// Quick database ping
-			sqlDB, err := db.DB()
-			var dbStatus string
-			if err != nil {
-				dbStatus = "error"
-			} else {
-				if err := sqlDB.Ping(); err != nil {
-					dbStatus = "disconnected"
-				} else {
-					dbStatus = "connected"
-				}
-			}
-
-			c.JSON(200, gin.H{
-				"server": gin.H{
-					"status":      "running",
-					"uptime":      time.Since(startTime).String(),
-					"environment": getEnvVar("APP_ENV", "development"),
-					"version":     "1.0.0",
-				},
-				"database": gin.H{
-					"status": dbStatus,
-					"host":   getEnvVar("DB_HOST", "localhost"),
-					"name":   getEnvVar("DB_NAME", "geoapp"),
-				},
-				"developer": "silverminesro",
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		})
-
-		// TODO: Add authentication routes
-		// TODO: Add game routes
-		// TODO: Add user management routes
-	}
-
-	return router
-}
+// ❌ REMOVED: setupRoutes function deleted from here to avoid duplicate declaration
 
 func testEnvConfig() error {
 	log.Println("🔍 Testing .env configuration...")

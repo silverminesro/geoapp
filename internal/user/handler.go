@@ -30,16 +30,16 @@ type UpdateLocationRequest struct {
 	Accuracy  float64 `json:"accuracy,omitempty"`
 }
 
+// ✅ OPRAVENÉ: Vymazané LastLocation z response
 type UserProfileResponse struct {
-	ID           uuid.UUID              `json:"id"`
-	Username     string                 `json:"username"`
-	Email        string                 `json:"email"`
-	Tier         int                    `json:"tier"`
-	IsActive     bool                   `json:"is_active"`
-	CreatedAt    time.Time              `json:"created_at"`
-	LastLocation *common.Location       `json:"last_location,omitempty"`
-	Stats        UserStats              `json:"stats"`
-	Inventory    []common.InventoryItem `json:"inventory,omitempty"`
+	ID        uuid.UUID              `json:"id"`
+	Username  string                 `json:"username"`
+	Email     string                 `json:"email"`
+	Tier      int                    `json:"tier"`
+	IsActive  bool                   `json:"is_active"`
+	CreatedAt time.Time              `json:"created_at"`
+	Stats     UserStats              `json:"stats"`
+	Inventory []common.InventoryItem `json:"inventory,omitempty"`
 }
 
 type UserStats struct {
@@ -80,16 +80,16 @@ func (h *Handler) GetProfile(c *gin.Context) {
 	// Vypočítaj štatistiky
 	stats := h.calculateUserStats(user.ID)
 
+	// ✅ OPRAVENÉ: Vymazané LastLocation z response
 	response := UserProfileResponse{
-		ID:           user.ID,
-		Username:     user.Username,
-		Email:        user.Email,
-		Tier:         user.Tier,
-		IsActive:     user.IsActive,
-		CreatedAt:    user.CreatedAt,
-		LastLocation: user.LastLocation,
-		Stats:        stats,
-		Inventory:    user.Inventory,
+		ID:        user.ID,
+		Username:  user.Username,
+		Email:     user.Email,
+		Tier:      user.Tier,
+		IsActive:  user.IsActive,
+		CreatedAt: user.CreatedAt,
+		Stats:     stats,
+		Inventory: user.Inventory,
 	}
 
 	// Cachuj na 5 minút
@@ -213,7 +213,7 @@ func (h *Handler) GetInventory(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// UpdateLocation - aktualizácia GPS pozície
+// ✅ OPRAVENÉ: UpdateLocation - bez database updates (zatiaľ len player session)
 func (h *Handler) UpdateLocation(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -233,7 +233,7 @@ func (h *Handler) UpdateLocation(c *gin.Context) {
 		return
 	}
 
-	// Aktualizuj pozíciu v databáze
+	// Vytvor location object
 	location := common.Location{
 		Latitude:  req.Latitude,
 		Longitude: req.Longitude,
@@ -241,19 +241,7 @@ func (h *Handler) UpdateLocation(c *gin.Context) {
 		Timestamp: time.Now(),
 	}
 
-	updates := map[string]interface{}{
-		"last_location_latitude":  location.Latitude,
-		"last_location_longitude": location.Longitude,
-		"last_location_accuracy":  location.Accuracy,
-		"last_location_timestamp": location.Timestamp,
-	}
-
-	if err := h.db.Model(&common.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update location"})
-		return
-	}
-
-	// Aktualizuj aj player session pre real-time tracking
+	// Aktualizuj len player session (user tabuľka nemá location stĺpce)
 	h.updatePlayerSession(userID.(uuid.UUID), location)
 
 	// Vymaž cache
@@ -261,7 +249,7 @@ func (h *Handler) UpdateLocation(c *gin.Context) {
 	redis.Delete(h.redis, cacheKey)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Location updated successfully",
+		"message":  "Location updated successfully in player session",
 		"location": location,
 	})
 }
@@ -270,11 +258,19 @@ func (h *Handler) UpdateLocation(c *gin.Context) {
 func (h *Handler) calculateUserStats(userID uuid.UUID) UserStats {
 	var stats UserStats
 
+	// ✅ OPRAVENÉ: Use int64 variables then convert
+	var totalArtifacts int64
+	var totalGear int64
+
 	// Spočítaj artefakty
-	h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "artifact").Count(&stats.TotalArtifacts)
+	h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "artifact").Count(&totalArtifacts)
 
 	// Spočítaj gear
-	h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "gear").Count(&stats.TotalGear)
+	h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "gear").Count(&totalGear)
+
+	// Convert to int
+	stats.TotalArtifacts = int(totalArtifacts)
+	stats.TotalGear = int(totalGear)
 
 	// Zóny navštívené (zatiaľ 0, implementujeme neskôr)
 	stats.ZonesVisited = 0
@@ -319,4 +315,61 @@ func calculateLevel(totalItems int) int {
 	} else {
 		return 5 + (totalItems-100)/50
 	}
+}
+
+// Missing methods - stub implementation
+func (h *Handler) GetInventoryByType(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get inventory by type not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetLocationHistory(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Location history not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetUserStats(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "User stats not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetAllUsers(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get all users not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) UpdateUserTier(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Update user tier not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) BanUser(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Ban user not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) UnbanUser(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Unban user not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetPlayerAnalytics(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Player analytics not implemented yet",
+		"status": "planned",
+	})
 }

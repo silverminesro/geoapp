@@ -391,3 +391,39 @@ func sqrt(x float64) float64 {
 func atan2(y, x float64) float64 {
 	return y / x // Zjednodušené - použiť math.Atan2
 }
+
+// Missing methods - stub implementation
+func (h *Handler) GetPlayersInZone(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get players in zone not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetLocationHistory(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Location history not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetLocationHeatmap(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Location heatmap not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) ShareLocation(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Share location not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetNearbyFriends(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get nearby friends not implemented yet",
+		"status": "planned",
+	})
+}
