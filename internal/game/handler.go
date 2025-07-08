@@ -30,7 +30,7 @@ func NewHandler(db *gorm.DB, redisClient *redis_client.Client) *Handler {
 // MAIN ENDPOINTS
 // ============================================
 
-// ScanArea - 🔥 HLAVNÝ ENDPOINT - opravený zone creation
+// ScanArea - 🔥 HLAVNÝ ENDPOINT - s debugging logmi
 func (h *Handler) ScanArea(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -88,6 +88,18 @@ func (h *Handler) ScanArea(c *gin.Context) {
 		log.Printf("🏗️ Creating %d new dynamic zones...", newZonesNeeded)
 		newZones = h.spawnDynamicZones(req.Latitude, req.Longitude, user.Tier, newZonesNeeded)
 		log.Printf("✅ Successfully created %d zones", len(newZones))
+
+		// 🔥 PRIDANÉ: Item spawning debugging
+		log.Printf("🎁 Starting item spawning for %d new zones...", len(newZones))
+		for i, zone := range newZones {
+			log.Printf("🎯 Processing zone %d/%d: %s (ID: %s)", i+1, len(newZones), zone.Name, zone.ID)
+
+			// Check if spawnItemsForNewZone function exists and works
+			log.Printf("🔧 Calling spawnItemsForNewZone for zone: %s", zone.Name)
+			h.spawnItemsForNewZone(zone.ID, zone.TierRequired)
+			log.Printf("✅ spawnItemsForNewZone completed for zone: %s", zone.Name)
+		}
+		log.Printf("🎉 Item spawning completed for all zones")
 	} else {
 		log.Printf("⚠️ No new zones needed (already at max)")
 	}
@@ -96,9 +108,12 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	allZones := append(existingZones, newZones...)
 	var zonesWithDetails []ZoneWithDetails
 
-	for _, zone := range allZones {
+	log.Printf("📊 Building zone details for %d total zones...", len(allZones))
+	for i, zone := range allZones {
 		details := h.buildZoneDetails(zone, req.Latitude, req.Longitude, user.Tier)
 		zonesWithDetails = append(zonesWithDetails, details)
+		log.Printf("📋 Zone %d: %s - Artifacts: %d, Gear: %d, Can Enter: %v",
+			i+1, zone.Name, details.ActiveArtifacts, details.ActiveGear, details.CanEnter)
 	}
 
 	// Nastav next scan time
