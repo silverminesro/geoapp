@@ -1,6 +1,7 @@
 package user
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -92,8 +93,10 @@ func (h *Handler) GetProfile(c *gin.Context) {
 		Inventory: user.Inventory,
 	}
 
-	// Cachuj na 5 minút
-	redis.SetWithExpiration(h.redis, cacheKey, response, 5*time.Minute)
+	// Cachuj na 5 minút (ak je Redis dostupný)
+	if h.redis != nil {
+		redis.SetWithExpiration(h.redis, cacheKey, response, 5*time.Minute)
+	}
 
 	c.JSON(http.StatusOK, response)
 }
@@ -149,16 +152,18 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 			return
 		}
 
-		// Vymaž cache
-		cacheKey := "user_profile:" + userID.(uuid.UUID).String()
-		redis.Delete(h.redis, cacheKey)
+		// Vymaž cache (ak je Redis dostupný)
+		if h.redis != nil {
+			cacheKey := "user_profile:" + userID.(uuid.UUID).String()
+			redis.Delete(h.redis, cacheKey)
+		}
 	}
 
 	// Vráť aktualizovaný profil
 	h.GetProfile(c)
 }
 
-// GetInventory - získanie inventára
+// ✅ OPRAVENÉ: GetInventory - s lepším error handling pre prázdny inventár
 func (h *Handler) GetInventory(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -180,8 +185,8 @@ func (h *Handler) GetInventory(c *gin.Context) {
 
 	offset := (page - 1) * limit
 
-	// Query pre inventár
-	query := h.db.Where("user_id = ?", userID)
+	// ✅ OPRAVENÉ: Lepšie query building pre inventár
+	query := h.db.Model(&common.InventoryItem{}).Where("user_id = ?", userID)
 
 	if itemType != "" {
 		query = query.Where("item_type = ?", itemType)
@@ -190,30 +195,58 @@ func (h *Handler) GetInventory(c *gin.Context) {
 	var inventory []common.InventoryItem
 	var totalCount int64
 
-	// Spočítaj celkový počet
-	query.Model(&common.InventoryItem{}).Count(&totalCount)
-
-	// Získaj items s pagináciou
-	if err := query.Limit(limit).Offset(offset).Order("acquired_at DESC").Find(&inventory).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch inventory"})
+	// ✅ OPRAVENÉ: Spočítaj celkový počet s error handling
+	if err := query.Count(&totalCount).Error; err != nil {
+		log.Printf("❌ Failed to count inventory items: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to count inventory items",
+			"details": err.Error(),
+		})
 		return
 	}
 
-	// Odpoveď s metadátami
+	// ✅ OPRAVENÉ: Získaj items s error handling pre prázdny result
+	if err := query.Limit(limit).Offset(offset).Order("created_at DESC").Find(&inventory).Error; err != nil {
+		log.Printf("❌ Failed to fetch inventory items: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch inventory items",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// ✅ OPRAVENÉ: Inicializuj prázdny slice ak je nil
+	if inventory == nil {
+		inventory = []common.InventoryItem{}
+	}
+
+	// Vypočítaj total pages
+	totalPages := int64(0)
+	if totalCount > 0 {
+		totalPages = (totalCount + int64(limit) - 1) / int64(limit)
+	}
+
+	// ✅ OPRAVENÉ: Odpoveď s metadátami (aj pre prázdny inventár)
 	response := gin.H{
-		"items": inventory,
+		"success": true,
+		"message": "Inventory retrieved successfully",
+		"items":   inventory,
 		"pagination": gin.H{
 			"current_page":   page,
-			"total_pages":    (totalCount + int64(limit) - 1) / int64(limit),
+			"total_pages":    totalPages,
 			"total_items":    totalCount,
 			"items_per_page": limit,
 		},
+		"filter": gin.H{
+			"item_type": itemType,
+		},
+		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ OPRAVENÉ: UpdateLocation - bez database updates (zatiaľ len player session)
+// ✅ OPRAVENÉ: UpdateLocation - používa LocationWithAccuracy
 func (h *Handler) UpdateLocation(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -233,28 +266,39 @@ func (h *Handler) UpdateLocation(c *gin.Context) {
 		return
 	}
 
-	// Vytvor location object
-	location := common.Location{
+	// ✅ OPRAVENÉ: Vytvor LocationWithAccuracy object
+	location := common.LocationWithAccuracy{
 		Latitude:  req.Latitude,
 		Longitude: req.Longitude,
 		Accuracy:  req.Accuracy,
 		Timestamp: time.Now(),
 	}
 
-	// Aktualizuj len player session (user tabuľka nemá location stĺpce)
-	h.updatePlayerSession(userID.(uuid.UUID), location)
+	// ✅ OPRAVENÉ: Aktualizuj player session s error handling
+	if err := h.updatePlayerSession(userID.(uuid.UUID), location); err != nil {
+		log.Printf("❌ Failed to update player session: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to update location in player session",
+			"details": err.Error(),
+		})
+		return
+	}
 
-	// Vymaž cache
-	cacheKey := "user_profile:" + userID.(uuid.UUID).String()
-	redis.Delete(h.redis, cacheKey)
+	// Vymaž cache (ak je Redis dostupný)
+	if h.redis != nil {
+		cacheKey := "user_profile:" + userID.(uuid.UUID).String()
+		redis.Delete(h.redis, cacheKey)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Location updated successfully in player session",
-		"location": location,
+		"success":   true,
+		"message":   "Location updated successfully in player session",
+		"location":  location,
+		"timestamp": time.Now().Format(time.RFC3339),
 	})
 }
 
-// Pomocné funkcie
+// ✅ OPRAVENÉ: Pomocné funkcie s lepším error handling
 func (h *Handler) calculateUserStats(userID uuid.UUID) UserStats {
 	var stats UserStats
 
@@ -262,11 +306,17 @@ func (h *Handler) calculateUserStats(userID uuid.UUID) UserStats {
 	var totalArtifacts int64
 	var totalGear int64
 
-	// Spočítaj artefakty
-	h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "artifact").Count(&totalArtifacts)
+	// Spočítaj artefakty s error handling
+	if err := h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "artifact").Count(&totalArtifacts).Error; err != nil {
+		log.Printf("⚠️ Failed to count artifacts for user %s: %v", userID, err)
+		totalArtifacts = 0
+	}
 
-	// Spočítaj gear
-	h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "gear").Count(&totalGear)
+	// Spočítaj gear s error handling
+	if err := h.db.Model(&common.InventoryItem{}).Where("user_id = ? AND item_type = ?", userID, "gear").Count(&totalGear).Error; err != nil {
+		log.Printf("⚠️ Failed to count gear for user %s: %v", userID, err)
+		totalGear = 0
+	}
 
 	// Convert to int
 	stats.TotalArtifacts = int(totalArtifacts)
@@ -282,16 +332,27 @@ func (h *Handler) calculateUserStats(userID uuid.UUID) UserStats {
 	return stats
 }
 
-func (h *Handler) updatePlayerSession(userID uuid.UUID, location common.Location) {
+// ✅ OPRAVENÉ: updatePlayerSession používa nový PlayerSession model s individual fields
+func (h *Handler) updatePlayerSession(userID uuid.UUID, location common.LocationWithAccuracy) error {
 	session := common.PlayerSession{
-		UserID:       userID,
-		LastSeen:     time.Now(),
-		IsOnline:     true,
-		LastLocation: location,
+		UserID:   userID,
+		LastSeen: time.Now(),
+		IsOnline: true,
+		// ✅ OPRAVENÉ: Použiť individual fields namiesto embedded struct
+		LastLocationLatitude:  location.Latitude,
+		LastLocationLongitude: location.Longitude,
+		LastLocationAccuracy:  location.Accuracy,
+		LastLocationTimestamp: location.Timestamp,
 	}
 
-	// Upsert player session
-	h.db.Where("user_id = ?", userID).Assign(session).FirstOrCreate(&session)
+	// ✅ OPRAVENÉ: Upsert player session s error return
+	if err := h.db.Where("user_id = ?", userID).Assign(session).FirstOrCreate(&session).Error; err != nil {
+		log.Printf("❌ Failed to upsert player session for user %s: %v", userID, err)
+		return err
+	}
+
+	log.Printf("📍 Player session updated for user %s: [%.6f, %.6f] (accuracy: %.1fm)", userID, location.Latitude, location.Longitude, location.Accuracy)
+	return nil
 }
 
 func isValidGPSCoordinate(lat, lng float64) bool {

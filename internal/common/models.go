@@ -37,8 +37,16 @@ type BaseModel struct {
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// Location embedded struct
+// ✅ OPRAVENÉ: Location bez Accuracy (databáza ho nemá)
 type Location struct {
+	Latitude  float64 `json:"latitude" gorm:"type:decimal(10,8)"`
+	Longitude float64 `json:"longitude" gorm:"type:decimal(11,8)"`
+	// ❌ REMOVED: Accuracy  float64   `json:"accuracy,omitempty"` // Database doesn't have this column
+	Timestamp time.Time `json:"timestamp" gorm:"autoUpdateTime"`
+}
+
+// ✅ PRIDANÉ: LocationWithAccuracy pre user tracking kde potrebujeme accuracy
+type LocationWithAccuracy struct {
 	Latitude  float64   `json:"latitude" gorm:"type:decimal(10,8)"`
 	Longitude float64   `json:"longitude" gorm:"type:decimal(11,8)"`
 	Accuracy  float64   `json:"accuracy,omitempty"`
@@ -121,16 +129,39 @@ type Gear struct {
 	Zone *Zone `json:"zone,omitempty" gorm:"foreignKey:ZoneID"`
 }
 
-// Player Session for real-time tracking
+// ✅ OPRAVENÉ: Player Session s LocationWithAccuracy pre last_location
 type PlayerSession struct {
 	BaseModel
-	UserID       uuid.UUID  `json:"user_id" gorm:"not null;index"`
-	LastSeen     time.Time  `json:"last_seen" gorm:"autoUpdateTime"`
-	IsOnline     bool       `json:"is_online" gorm:"default:true"`
-	CurrentZone  *uuid.UUID `json:"current_zone,omitempty" gorm:"index"`
-	LastLocation Location   `json:"last_location" gorm:"embedded;embeddedPrefix:last_location_"`
+	UserID      uuid.UUID  `json:"user_id" gorm:"not null;index"`
+	LastSeen    time.Time  `json:"last_seen" gorm:"autoUpdateTime"`
+	IsOnline    bool       `json:"is_online" gorm:"default:true"`
+	CurrentZone *uuid.UUID `json:"current_zone,omitempty" gorm:"index"`
+
+	// ✅ OPRAVENÉ: Use individual fields instead of embedded struct for last_location
+	LastLocationLatitude  float64   `json:"last_location_latitude" gorm:"type:decimal(10,8)"`
+	LastLocationLongitude float64   `json:"last_location_longitude" gorm:"type:decimal(11,8)"`
+	LastLocationAccuracy  float64   `json:"last_location_accuracy"`
+	LastLocationTimestamp time.Time `json:"last_location_timestamp"`
 
 	// Relationships
 	User *User `json:"user,omitempty" gorm:"foreignKey:UserID"`
 	Zone *Zone `json:"zone,omitempty" gorm:"foreignKey:CurrentZone"`
+}
+
+// ✅ PRIDANÉ: Helper method pre PlayerSession to get LastLocation as struct
+func (ps *PlayerSession) GetLastLocation() LocationWithAccuracy {
+	return LocationWithAccuracy{
+		Latitude:  ps.LastLocationLatitude,
+		Longitude: ps.LastLocationLongitude,
+		Accuracy:  ps.LastLocationAccuracy,
+		Timestamp: ps.LastLocationTimestamp,
+	}
+}
+
+// ✅ PRIDANÉ: Helper method pre PlayerSession to set LastLocation from struct
+func (ps *PlayerSession) SetLastLocation(loc LocationWithAccuracy) {
+	ps.LastLocationLatitude = loc.Latitude
+	ps.LastLocationLongitude = loc.Longitude
+	ps.LastLocationAccuracy = loc.Accuracy
+	ps.LastLocationTimestamp = loc.Timestamp
 }
