@@ -57,7 +57,7 @@ func TestConnection(client *redis.Client) error {
 	}
 
 	// Test basic operations
-	testKey := "geoapp:test:connection"
+	testKey := "geoanomaly:test:connection"
 	testValue := "connected"
 
 	// Set test value

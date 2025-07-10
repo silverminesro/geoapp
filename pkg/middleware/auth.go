@@ -71,7 +71,7 @@ func GenerateJWT(userID uuid.UUID, username string, tier int) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
-			Issuer:    "geoapp",
+			Issuer:    "geoanomaly",
 		},
 	}
 

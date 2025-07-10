@@ -8,7 +8,7 @@ import (
 
 func Logger() gin.HandlerFunc {
 	return gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		return fmt.Sprintf("[GeoApp] %v | %3d | %13v | %15s | %-7s %#v\n%s",
+		return fmt.Sprintf("[GeoAnomaly] %v | %3d | %13v | %15s | %-7s %#v\n%s",
 			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
 			param.StatusCode,
 			param.Latency,

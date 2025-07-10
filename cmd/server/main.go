@@ -34,7 +34,7 @@ func init() {
 }
 
 func main() {
-	log.Println("🚀 Starting GeoApp Backend Server...")
+	log.Println("🚀 Starting GeoAnomaly Backend Server...")
 	log.Printf("⏰ Start Time: %s", startTime.Format("2006-01-02 15:04:05"))
 	log.Printf("👤 Started by: silverminesro")
 
@@ -208,7 +208,7 @@ func setDefaultEnvVars() {
 		"DB_PORT":     "5432",
 		"DB_USER":     "postgres",
 		"DB_PASSWORD": "password",
-		"DB_NAME":     "geoapp",
+		"DB_NAME":     "geoanomaly",
 		"DB_SSLMODE":  "disable",
 		"DB_TIMEZONE": "UTC",
 
@@ -248,7 +248,7 @@ func printServerInfo(host, port string) {
 	separator := strings.Repeat("=", 60)
 
 	fmt.Println("\n" + separator)
-	fmt.Println("🎮 GEOAPP BACKEND SERVER")
+	fmt.Println("🎮 GeoAnomaly BACKEND SERVER")
 	fmt.Println(separator)
 	fmt.Printf("🌐 Server:        http://%s:%s\n", host, port)
 	fmt.Printf("📊 Health Check:  http://%s:%s/health\n", host, port)

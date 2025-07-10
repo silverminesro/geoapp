@@ -38,8 +38,8 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 		c.JSON(200, gin.H{
 			"status":     "healthy",
 			"timestamp":  time.Now().Format(time.RFC3339),
-			"version":    "1.0.0",
-			"service":    "geoapp-backend",
+			"version":    "0.0.5",
+			"service":    "geoanomaly-backend",
 			"created_by": "silverminesro",
 		})
 	})
@@ -47,12 +47,12 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	// Basic info endpoint (merge from main.go)
 	router.GET("/info", func(c *gin.Context) {
 		c.JSON(200, gin.H{
-			"name":        "GeoApp Backend",
-			"version":     "1.0.0",
+			"name":        "GeoAnomaly Backend",
+			"version":     "0.0.5",
 			"environment": getEnvVar("APP_ENV", "development"),
 			"uptime":      time.Since(startTime).String(),
 			"developer":   "silverminesro",
-			"database":    getEnvVar("DB_NAME", "geoapp") + "@" + getEnvVar("DB_HOST", "localhost"),
+			"database":    getEnvVar("DB_NAME", "geoanomaly") + "@" + getEnvVar("DB_HOST", "localhost"),
 		})
 	})
 
@@ -62,7 +62,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 		// Basic test endpoints (merge from main.go)
 		v1.GET("/test", func(c *gin.Context) {
 			c.JSON(200, gin.H{
-				"message":   "🎮 GeoApp API is working perfectly!",
+				"message":   "🎮 GeoAnomaly API is working perfectly!",
 				"time":      time.Now().Format(time.RFC3339),
 				"endpoint":  "/api/v1/test",
 				"developer": "silverminesro",
@@ -166,7 +166,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 				"database": gin.H{
 					"status": dbStatus,
 					"host":   getEnvVar("DB_HOST", "localhost"),
-					"name":   getEnvVar("DB_NAME", "geoapp"),
+					"name":   getEnvVar("DB_NAME", "geoanomaly"),
 				},
 				"developer": "silverminesro",
 				"timestamp": time.Now().Format(time.RFC3339),
@@ -342,7 +342,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 		// API documentation
 		systemRoutes.GET("/endpoints", func(c *gin.Context) {
 			c.JSON(200, gin.H{
-				"message": "GeoApp API Endpoints",
+				"message": "GeoAnomaly API Endpoints",
 				"version": "1.0.0",
 				"endpoints": gin.H{
 					"auth": gin.H{
@@ -382,7 +382,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	{
 		metricsRoutes.GET("/prometheus", func(c *gin.Context) {
 			// TODO: Implementovať Prometheus metrics
-			c.String(200, "# GeoApp Metrics\n# Coming soon...")
+			c.String(200, "# GeoAnomaly Metrics\n# Coming soon...")
 		})
 	}
 

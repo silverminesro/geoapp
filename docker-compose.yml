@@ -4,8 +4,8 @@ services:
   postgres:
     image: postgis/postgis:15-3.3
     environment:
-      POSTGRES_DB: geoapp_db
-      POSTGRES_USER: geoapp
+      POSTGRES_DB: geoanomaly_db
+      POSTGRES_USER: geoanomaly
       POSTGRES_PASSWORD: secure_password
     ports:
       - "5432:5432"
