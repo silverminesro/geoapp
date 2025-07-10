@@ -94,7 +94,7 @@ func initDB() (*gorm.DB, error) {
 		getEnvVar("DB_HOST", "localhost"),
 		getEnvVar("DB_USER", "postgres"),
 		getEnvVar("DB_PASSWORD", ""),
-		getEnvVar("DB_NAME", "geoapp"),
+		getEnvVar("DB_NAME", "geoanomaly"),
 		getEnvVar("DB_PORT", "5432"),
 		getEnvVar("DB_SSLMODE", "disable"),
 		getEnvVar("DB_TIMEZONE", "UTC"),
@@ -241,7 +241,7 @@ func printServerInfo(host, port string) {
 	uptime := time.Since(startTime).Round(time.Second)
 
 	// Get config from .env
-	dbName := getEnvVar("DB_NAME", "geoapp")
+	dbName := getEnvVar("DB_NAME", "geoanomaly")
 	dbHost := getEnvVar("DB_HOST", "localhost")
 	jwtSecret := getEnvVar("JWT_SECRET", "")
 
