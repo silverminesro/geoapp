@@ -3,12 +3,12 @@ package main
 import (
 	"time"
 
-	"geoapp/internal/auth"
-	"geoapp/internal/common"
-	"geoapp/internal/game"
-	"geoapp/internal/location"
-	"geoapp/internal/user"
-	"geoapp/pkg/middleware"
+	"geoanomaly/internal/auth"
+	"geoanomaly/internal/common"
+	"geoanomaly/internal/game"
+	"geoanomaly/internal/location"
+	"geoanomaly/internal/user"
+	"geoanomaly/pkg/middleware"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

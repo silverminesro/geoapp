@@ -1,4 +1,4 @@
-module geoapp
+module geoanomaly
 
 go 1.23
 

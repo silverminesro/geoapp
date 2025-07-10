@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"time"
 
-	"geoapp/internal/common"
+	"geoanomaly/internal/common"
 
 	"github.com/google/uuid"
 )

@@ -1,13 +1,13 @@
-# GeoApp Backend - Proprietary License
+# 👽 GeoAnomaly Backend - Proprietary License
 **Copyright © 2025 silverminesro. All Rights Reserved.**
 
 ---
 
 ## 🏢 **OWNERSHIP & OPERATION**
 
-**silverminesro** is the **EXCLUSIVE OWNER and OPERATOR** of GeoApp Backend software and all related intellectual property.
+**silverminesro** is the **EXCLUSIVE OWNER and OPERATOR** of GeoAnomaly Backend software and all related intellectual property.
 
-**Date:** 2025-07-08 16:27:22 UTC  
+**Date:** 2025-07-10 07:30:57 UTC  
 **Owner:** silverminesro  
 **Status:** Proprietary Software - All Rights Reserved
 
@@ -17,7 +17,7 @@
 
 ### 🔐 **1. EXCLUSIVE RIGHTS**
 - **silverminesro** retains ALL rights, title, and interest in the Software
-- **silverminesro** is the ONLY authorized operator of GeoApp services
+- **silverminesro** is the ONLY authorized operator of GeoAnomaly services
 - NO third-party hosting, distribution, or operation permitted
 - NO derivative works or modifications allowed without written consent
 

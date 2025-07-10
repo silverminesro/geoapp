@@ -1,7 +1,7 @@
 package game
 
 import (
-	"geoapp/internal/common"
+	"geoanomaly/internal/common"
 	"time"
 )
 

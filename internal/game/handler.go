@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"geoapp/internal/common"
+	"geoanomaly/internal/common"
 
 	"github.com/gin-gonic/gin"
 	redis_client "github.com/redis/go-redis/v9"

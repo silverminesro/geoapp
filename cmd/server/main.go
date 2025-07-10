@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"geoapp/internal/common"
+	"geoanomaly/internal/common"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"

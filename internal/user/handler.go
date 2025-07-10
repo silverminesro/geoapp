@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"geoapp/internal/common"
-	"geoapp/pkg/redis"
+	"geoanomaly/internal/common"
+	"geoanomaly/pkg/redis"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

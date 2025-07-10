@@ -1,7 +1,7 @@
 package admin
 
 import (
-	"geoapp/internal/common"
+	"geoanomaly/internal/common"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

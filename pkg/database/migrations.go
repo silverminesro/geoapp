@@ -1,7 +1,7 @@
 package database
 
 import (
-	"geoapp/internal/common"
+	"geoanomaly/internal/common"
 
 	"gorm.io/gorm"
 )

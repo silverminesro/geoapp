@@ -1,26 +1,28 @@
-# 🎮 GeoApp Backend - Location-Based AR Game
+# 👽 GeoAnomaly Backend - Reality's Hidden Mysteries
 
 **Created by: silverminesro**  
-**Last Updated: 2025-07-08 16:18:19 UTC**  
+**Last Updated: 2025-07-10 07:30:57 UTC**  
 **Status: ✅ Production Ready**
 
 ## 🌟 **Project Overview**
 
-GeoApp is a revolutionary location-based augmented reality game where players explore real-world locations to discover zones, collect artifacts, and gather gear. The backend system manages dynamic zone creation, item spawning, player progression, and real-time multiplayer features.
+GeoAnomaly is a revolutionary location-based augmented reality game where players use their mobile devices to detect and investigate mysterious anomalies scattered throughout the real world. These anomalies contain powerful artifacts and gear from unknown origins, challenging players to explore reality's hidden mysteries.
 
-### 🎯 **Core Features**
-- 🗺️ **Dynamic Zone System** - Creates game zones at real GPS locations
-- 💎 **Item Collection** - Artifacts and gear spawn dynamically in zones  
-- 👥 **Multiplayer Support** - Real-time player tracking and interaction
-- 🏆 **Tier System** - 5-tier subscription model (Tier 0-4)
-- 📊 **Player Progression** - XP, levels, and achievement tracking
-- 🔐 **Secure Authentication** - JWT-based user management
+### 🔍 **Core Features**
+- 👽 **Anomaly Detection** - Scan real locations for dimensional rifts and mysterious phenomena
+- 💎 **Artifact Recovery** - Collect mysterious objects of unknown origin with unique properties
+- ⚡ **Anomalous Gear** - Equipment that defies conventional physics and enhances detection
+- 🌌 **Reality Glitches** - Zones where normal rules don't apply and strange things happen
+- 👥 **Multiplayer Investigation** - Real-time collaboration with other anomaly hunters
+- 🏆 **Tier System** - 5-tier subscription model (Tier 0-4) for advanced detection capabilities
+- 📊 **Hunter Progression** - XP, levels, and achievement tracking for dedicated investigators
+- 🔐 **Secure Operations** - JWT-based authentication for authorized personnel
 
 ### 🛠️ **Technology Stack**
 - **Backend**: Go 1.21+ with Gin framework
 - **Database**: PostgreSQL 15+ with PostGIS extension
-- **Cache**: Redis for real-time features
-- **Authentication**: JWT tokens with bcrypt
+- **Cache**: Redis for real-time anomaly tracking
+- **Authentication**: JWT tokens with bcrypt encryption
 - **API**: RESTful endpoints with JSON responses
 
 ---
@@ -28,14 +30,14 @@ GeoApp is a revolutionary location-based augmented reality game where players ex
 ## 🏗️ **System Architecture**
 
 ```
-geoapp/
+geoanomaly/
 ├── cmd/server/          # Application entry point
 │   ├── main.go         # Server startup and configuration
 │   └── router.go       # API route definitions
-├── internal/           # Core business logic
+├── internal/           # Core anomaly detection logic
 │   ├── auth/           # Authentication handlers
-│   ├── user/           # User management
-│   ├── game/           # Game mechanics and zone system
+│   ├── user/           # User management (anomaly hunters)
+│   ├── game/           # Anomaly detection and zone system
 │   ├── location/       # Real-time location tracking
 │   ├── admin/          # Administrative functions
 │   └── common/         # Shared models and utilities
@@ -62,8 +64,8 @@ geoapp/
 
 1. **Clone Repository**
 ```bash
-git clone https://github.com/silverminesro/geoapp.git
-cd geoapp
+git clone https://github.com/silverminesro/GeoAnomaly.git
+cd GeoAnomaly
 ```
 
 2. **Install Dependencies**
@@ -74,7 +76,7 @@ go mod download
 3. **Database Setup**
 ```sql
 -- Create database
-CREATE DATABASE geoapp_db;
+CREATE DATABASE geoanomaly_db;
 
 -- Enable PostGIS extension
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -95,7 +97,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=your_password
-DB_NAME=geoapp_db
+DB_NAME=geoanomaly_db
 DB_SSLMODE=disable
 DB_TIMEZONE=UTC
 
@@ -127,7 +129,7 @@ Server starts on: `http://localhost:8080`
 
 ## 📊 **Database Schema**
 
-### 👤 **Users Table**
+### 👤 **Users Table (Anomaly Hunters)**
 ```sql
 CREATE TABLE users (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -152,7 +154,7 @@ CREATE TABLE users (
 );
 ```
 
-### 🏰 **Zones Table**
+### 🌌 **Zones Table (Anomalous Areas)**
 ```sql
 CREATE TABLE zones (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -172,7 +174,7 @@ CREATE TABLE zones (
 );
 ```
 
-### 💎 **Artifacts & Gear Tables**
+### 💎 **Artifacts & Gear Tables (Anomalous Objects)**
 ```sql
 CREATE TABLE artifacts (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -213,14 +215,14 @@ CREATE TABLE gear (
 
 ### 🔐 **Authentication Endpoints**
 
-#### Register User
+#### Register Anomaly Hunter
 ```http
 POST /api/v1/auth/register
 Content-Type: application/json
 
 {
-    "username": "player123",
-    "email": "player@example.com", 
+    "username": "hunter123",
+    "email": "hunter@geoanomaly.com", 
     "password": "securepass123"
 }
 ```
@@ -228,32 +230,32 @@ Content-Type: application/json
 **Response:**
 ```json
 {
-    "message": "User registered successfully",
+    "message": "Anomaly hunter registered successfully",
     "token": "eyJhbGciOiJIUzI1NiIs...",
     "user": {
         "id": "550e8400-e29b-41d4-a716-446655440000",
-        "username": "player123",
-        "email": "player@example.com",
+        "username": "hunter123",
+        "email": "hunter@geoanomaly.com",
         "tier": 0,
         "is_active": true
     }
 }
 ```
 
-#### Login User
+#### Login Hunter
 ```http
 POST /api/v1/auth/login
 Content-Type: application/json
 
 {
-    "username": "player123",
+    "username": "hunter123",
     "password": "securepass123"
 }
 ```
 
-### 🎮 **Game Mechanics Endpoints**
+### 🌌 **Anomaly Detection Endpoints**
 
-#### Scan Area for Zones
+#### Scan Area for Anomalies
 ```http
 POST /api/v1/game/scan-area
 Authorization: Bearer <token>
@@ -273,7 +275,7 @@ Content-Type: application/json
         {
             "zone": {
                 "id": "f97cd7e8-76a3-4fa9-8234-238410a084eb",
-                "name": "Ancient Ruins",
+                "name": "Dimensional Rift Alpha",
                 "tier_required": 1
             },
             "active_artifacts": 8,
@@ -287,27 +289,27 @@ Content-Type: application/json
 }
 ```
 
-#### Get Nearby Zones
+#### Get Nearby Anomalous Zones
 ```http
 GET /api/v1/game/zones/nearby?lat=49.2000&lng=18.5000&radius=5
 Authorization: Bearer <token>
 ```
 
-### 👤 **User Management Endpoints**
+### 👤 **Hunter Management Endpoints**
 
-#### Get User Profile
+#### Get Hunter Profile
 ```http
 GET /api/v1/user/profile
 Authorization: Bearer <token>
 ```
 
-#### Get User Inventory
+#### Get Collected Anomalies (Inventory)
 ```http
 GET /api/v1/user/inventory?page=1&limit=50&type=artifact
 Authorization: Bearer <token>
 ```
 
-#### Update Location
+#### Update Hunter Location
 ```http
 POST /api/v1/user/location
 Authorization: Bearer <token>
@@ -320,15 +322,15 @@ Content-Type: application/json
 }
 ```
 
-### 📍 **Location Tracking Endpoints**
+### 📍 **Multi-Hunter Tracking Endpoints**
 
-#### Get Nearby Players
+#### Get Nearby Hunters
 ```http
 GET /api/v1/location/nearby?lat=49.2000&lng=18.5000
 Authorization: Bearer <token>
 ```
 
-#### Get Zone Activity
+#### Get Anomaly Zone Activity
 ```http
 GET /api/v1/location/zones/{zone_id}/activity
 Authorization: Bearer <token>
@@ -340,10 +342,10 @@ Authorization: Bearer <token>
 
 ### PowerShell Testing Script
 ```powershell
-# 1. Register User
+# 1. Register Anomaly Hunter
 $registerData = @{
-    username = "testuser"
-    email = "test@example.com"
+    username = "anomalyhunter"
+    email = "hunter@geoanomaly.com"
     password = "password123"
 } | ConvertTo-Json
 
@@ -355,29 +357,29 @@ $headers = @{
     "Content-Type" = "application/json"
 }
 
-# 3. Scan Area for Zones
+# 3. Scan Area for Anomalies
 $scanData = @{
     latitude = 49.2000
     longitude = 18.5000
 } | ConvertTo-Json
 
-$zones = irm "http://localhost:8080/api/v1/game/scan-area" -Method POST -Headers $headers -Body $scanData
+$anomalies = irm "http://localhost:8080/api/v1/game/scan-area" -Method POST -Headers $headers -Body $scanData
 
 # 4. Display Results
-Write-Host "Zones Created: $($zones.zones_created)"
-$zones.zones | ForEach-Object {
+Write-Host "Anomalous Zones Created: $($anomalies.zones_created)"
+$anomalies.zones | ForEach-Object {
     Write-Host "Zone: $($_.zone.name) - Artifacts: $($_.active_artifacts), Gear: $($_.active_gear)"
 }
 ```
 
 ### cURL Testing Examples
 ```bash
-# Register User
+# Register Anomaly Hunter
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"testuser","email":"test@example.com","password":"password123"}'
+  -d '{"username":"anomalyhunter","email":"hunter@geoanomaly.com","password":"password123"}'
 
-# Scan Area (replace TOKEN with actual JWT)
+# Scan Area for Anomalies (replace TOKEN with actual JWT)
 curl -X POST http://localhost:8080/api/v1/game/scan-area \
   -H "Authorization: Bearer TOKEN" \
   -H "Content-Type: application/json" \
@@ -386,31 +388,31 @@ curl -X POST http://localhost:8080/api/v1/game/scan-area \
 
 ---
 
-## 🎮 **Game Mechanics**
+## 🎮 **Anomaly Detection Mechanics**
 
-### 🏆 **Tier System**
-| Tier | Name | Max Zones | Collect Cooldown | Scan Cooldown | Features |
-|------|------|-----------|------------------|---------------|-----------|
-| 0 | Free | 1 | 300s | 30min | Basic gameplay |
-| 1 | Bronze | 3 | 240s | 25min | More zones |
-| 2 | Silver | 5 | 180s | 20min | Premium items |
-| 3 | Gold | 8 | 120s | 15min | Rare artifacts |
-| 4 | Platinum | 12 | 60s | 10min | Legendary items |
+### 🏆 **Hunter Tier System**
+| Tier | Name | Max Zones | Detection Cooldown | Scan Cooldown | Special Abilities |
+|------|------|-----------|-------------------|---------------|-------------------|
+| 0 | Novice | 1 | 300s | 30min | Basic detection |
+| 1 | Apprentice | 3 | 240s | 25min | Enhanced sensitivity |
+| 2 | Investigator | 5 | 180s | 20min | Rare anomaly access |
+| 3 | Expert | 8 | 120s | 15min | Dimensional artifacts |
+| 4 | Master | 12 | 60s | 10min | Legendary phenomena |
 
-### 🗺️ **Zone Types**
-- **Static**: Permanent zones at fixed locations
-- **Dynamic**: Temporary zones created by player scanning
-- **Event**: Special time-limited zones with unique rewards
+### 🌌 **Anomaly Zone Types**
+- **Static**: Permanent dimensional rifts at fixed coordinates
+- **Dynamic**: Temporary anomalies that appear during scanning
+- **Event**: Special phenomena with unique temporal properties
 
-### 💎 **Item Spawning Formula**
-- **Artifacts per zone**: `2 + (tier * 2)`
-- **Gear per zone**: `1 + tier`
-- **Higher tiers**: Better rarity distribution
+### 💎 **Anomalous Object Spawning**
+- **Artifacts per zone**: `2 + (tier * 2)` mysterious objects
+- **Gear per zone**: `1 + tier` anomalous equipment
+- **Higher tiers**: Access to rarer and more powerful anomalies
 
-### 📈 **Player Progression**
-- **XP System**: Gain XP from collecting items and discovering zones
-- **Levels**: 1-200, unlock cosmetics and features
-- **Achievements**: Track various gameplay milestones
+### 📈 **Hunter Progression**
+- **XP System**: Gain experience from discovering anomalies and collecting artifacts
+- **Levels**: 1-200, unlock advanced detection capabilities and equipment
+- **Achievements**: Track investigation milestones and special discoveries
 
 ---
 
@@ -422,9 +424,9 @@ GET /health
 ```json
 {
     "status": "healthy",
-    "timestamp": "2025-07-08T16:18:19Z",
+    "timestamp": "2025-07-10T07:30:57Z",
     "version": "1.0.0",
-    "service": "geoapp-backend"
+    "service": "geoanomaly-backend"
 }
 ```
 
@@ -433,10 +435,10 @@ GET /api/v1/system/stats
 ```
 ```json
 {
-    "active_players": 15,
-    "total_zones": 250,
+    "active_hunters": 15,
+    "total_anomalies": 250,
     "dynamic_zones": 180,
-    "static_zones": 70,
+    "static_rifts": 70,
     "server_uptime": "2h30m15s"
 }
 ```
@@ -450,40 +452,40 @@ GET /api/v1/system/stats
 docker-compose up -d
 
 # Production Build
-docker build -t geoapp-backend .
-docker run -p 8080:8080 geoapp-backend
+docker build -t geoanomaly-backend .
+docker run -p 8080:8080 geoanomaly-backend
 ```
 
 ---
 
-## 📈 **Current Status (2025-07-08)**
+## 📈 **Current Status (2025-07-10)**
 
 ### ✅ **Implemented Features**
-- ✅ User authentication (register/login/JWT)
-- ✅ Dynamic zone creation and management
-- ✅ Item spawning system (artifacts & gear)
-- ✅ Real-time location tracking
-- ✅ Player sessions and multiplayer support
-- ✅ Tier-based progression system
-- ✅ Admin endpoints for zone management
+- ✅ Hunter authentication (register/login/JWT)
+- ✅ Dynamic anomaly zone creation and management
+- ✅ Anomalous object spawning system (artifacts & gear)
+- ✅ Real-time hunter location tracking
+- ✅ Multi-hunter sessions and collaboration support
+- ✅ Tier-based progression system for advanced detection
+- ✅ Admin endpoints for anomaly management
 - ✅ Comprehensive API with 50+ endpoints
 
 ### 🧪 **Latest Test Results**
-**User: K44Test (Tier 1)**  
-**Location: [49.3000, 18.6000]**
-- Zones Created: 3 (1x T1, 2x T2)
-- Total Items: 32 artifacts, 16 gear
-- Database: 4 users, 9 zones total
-- All endpoints functional ✅
+**Hunter: K44Test (Tier 1)**  
+**Scan Location: [49.3000, 18.6000]**
+- Anomalous Zones Created: 3 (1x T1, 2x T2)
+- Total Anomalous Objects: 32 artifacts, 16 gear
+- Database: 4 hunters, 9 anomaly zones total
+- All detection systems functional ✅
 
-### 🚀 **Ready for Production**
-The system is fully functional and ready for Flutter mobile app integration.
+### 🚀 **Ready for Investigation**
+The system is fully operational and ready for mobile anomaly detection app integration.
 
 ---
 
 ## 👨‍💻 **Development**
 
-### 🔄 **Adding New Features**
+### 🔄 **Adding New Anomaly Types**
 1. Create handler in appropriate `internal/` package
 2. Add routes in `cmd/server/router.go`
 3. Update models in `internal/common/models.go`
@@ -496,16 +498,16 @@ db.AutoMigrate(&common.User{}, &common.Zone{}, &common.Artifact{}, &common.Gear{
 ```
 
 ### 📝 **Logging**
-Server logs all requests, database operations, and game events with structured logging.
+Server logs all detection attempts, database operations, and anomaly events with structured logging.
 
 ---
 
 ## 🤝 **Contributing**
 
 1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
+2. Create feature branch (`git checkout -b feature/new-anomaly-type`)
+3. Commit changes (`git commit -m 'Add new anomaly detection feature'`)
+4. Push to branch (`git push origin feature/new-anomaly-type`)
 5. Open Pull Request
 
 ---
@@ -513,31 +515,31 @@ Server logs all requests, database operations, and game events with structured l
 ## 📞 **Support**
 
 **Created by**: silverminesro  
-**Repository**: https://github.com/silverminesro/geoapp  
-**Issues**: https://github.com/silverminesro/geoapp/issues
+**Repository**: https://github.com/silverminesro/GeoAnomaly  
+**Issues**: https://github.com/silverminesro/GeoAnomaly/issues
 
 ---
 
 ## 📜 **License & Ownership**
 
-**GeoApp Backend** is **PROPRIETARY SOFTWARE** exclusively owned and operated by **silverminesro**.
+**GeoAnomaly Backend** is **PROPRIETARY SOFTWARE** exclusively owned and operated by **silverminesro**.
 
 ### 🔒 **EXCLUSIVE OWNERSHIP**
 - **Owner & Operator:** silverminesro
 - **Status:** All Rights Reserved
-- **Date:** 2025-07-08 16:27:22 UTC
+- **Date:** 2025-07-10 07:30:57 UTC
 
 ### 🚫 **STRICTLY PROHIBITED:**
 - ❌ Any commercial use or distribution
 - ❌ Third-party hosting or operation  
-- ❌ Creating competing services
+- ❌ Creating competing anomaly detection services
 - ❌ SaaS or cloud deployment
 - ❌ Mobile app integration without permission
 
 ### 🎯 **OFFICIAL SERVICE:**
-**GeoApp** services are available EXCLUSIVELY through **silverminesro**.
+**GeoAnomaly** detection services are available EXCLUSIVELY through **silverminesro**.
 
-For business inquiries: **silverminesro@email.com**
+For business inquiries: **silverminesro@gmail.com**
 
 ---
 
@@ -547,4 +549,4 @@ For business inquiries: **silverminesro@email.com**
 
 ---
 
-**🎮 Ready to explore? Start your GeoApp adventure today!** ✨
+**👽 Ready to investigate reality's mysteries? Start your GeoAnomaly hunt today!** ✨

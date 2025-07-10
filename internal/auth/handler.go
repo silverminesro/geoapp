@@ -3,8 +3,8 @@ package auth
 import (
 	"context"
 	"fmt"
-	"geoapp/internal/common"
-	"geoapp/pkg/middleware"
+	"geoanomaly/internal/common"
+	"geoanomaly/pkg/middleware"
 	"net/http"
 	"time"
 
