@@ -30,7 +30,7 @@ func NewHandler(db *gorm.DB, redisClient *redis_client.Client) *Handler {
 // MAIN ENDPOINTS
 // ============================================
 
-// ScanArea - 🔥 HLAVNÝ ENDPOINT - s debugging logmi
+// ScanArea - 🔥 HLAVNÝ ENDPOINT s tier filtering
 func (h *Handler) ScanArea(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -59,7 +59,7 @@ func (h *Handler) ScanArea(c *gin.Context) {
 
 	log.Printf("🔍 Player %s (tier %d) scanning area at [%.6f, %.6f]", user.Username, user.Tier, req.Latitude, req.Longitude)
 
-	// ✅ OPRAVENÉ: Kontrola rate limit - ale len warning ak Redis nedostupný
+	// ✅ Rate limit check
 	scanKey := fmt.Sprintf("area_scan:%s", userID)
 	if h.redis != nil && !h.checkAreaScanRateLimit(scanKey) {
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -83,33 +83,32 @@ func (h *Handler) ScanArea(c *gin.Context) {
 
 	var newZones []common.Zone
 
-	// ✅ OPRAVENÉ: Force zone creation pre testing ak je databáza prázdna
+	// Vytvor nové zóny ak je potreba
 	if newZonesNeeded > 0 {
 		log.Printf("🏗️ Creating %d new dynamic zones...", newZonesNeeded)
 		newZones = h.spawnDynamicZones(req.Latitude, req.Longitude, user.Tier, newZonesNeeded)
 		log.Printf("✅ Successfully created %d zones", len(newZones))
 
-		// 🔥 PRIDANÉ: Item spawning debugging
+		// Spawn items v nových zónách
 		log.Printf("🎁 Starting item spawning for %d new zones...", len(newZones))
 		for i, zone := range newZones {
 			log.Printf("🎯 Processing zone %d/%d: %s (ID: %s)", i+1, len(newZones), zone.Name, zone.ID)
-
-			// Check if spawnItemsForNewZone function exists and works
-			log.Printf("🔧 Calling spawnItemsForNewZone for zone: %s", zone.Name)
 			h.spawnItemsForNewZone(zone.ID, zone.TierRequired)
-			log.Printf("✅ spawnItemsForNewZone completed for zone: %s", zone.Name)
+			log.Printf("✅ Items spawned for zone: %s", zone.Name)
 		}
 		log.Printf("🎉 Item spawning completed for all zones")
 	} else {
 		log.Printf("⚠️ No new zones needed (already at max)")
 	}
 
-	// Vytvor detailné informácie o zónách
+	// ✅ Filter zones by tier before building details
 	allZones := append(existingZones, newZones...)
+	visibleZones := h.filterZonesByTier(allZones, user.Tier)
+
 	var zonesWithDetails []ZoneWithDetails
 
-	log.Printf("📊 Building zone details for %d total zones...", len(allZones))
-	for i, zone := range allZones {
+	log.Printf("📊 Building zone details for %d visible zones (filtered from %d total)...", len(visibleZones), len(allZones))
+	for i, zone := range visibleZones {
 		details := h.buildZoneDetails(zone, req.Latitude, req.Longitude, user.Tier)
 		zonesWithDetails = append(zonesWithDetails, details)
 		log.Printf("📋 Zone %d: %s - Artifacts: %d, Gear: %d, Can Enter: %v",
@@ -119,24 +118,24 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	// Nastav next scan time
 	nextScanTime := time.Now().Add(AreaScanCooldown * time.Minute)
 
+	// ✅ OPRAVENÉ: Convert ScanAreaRequest to LocationPoint properly
+	scanCenter := LocationPoint(req)
+
 	response := ScanAreaResponse{
-		ZonesCreated: len(newZones),
-		Zones:        zonesWithDetails,
-		ScanAreaCenter: LocationPoint{
-			Latitude:  req.Latitude,
-			Longitude: req.Longitude,
-		},
+		ZonesCreated:      len(newZones),
+		Zones:             zonesWithDetails,
+		ScanAreaCenter:    scanCenter, // ✅ Use proper conversion
 		NextScanAvailable: nextScanTime.Unix(),
 		MaxZones:          maxZones,
-		CurrentZoneCount:  len(allZones),
+		CurrentZoneCount:  len(visibleZones),
 		PlayerTier:        user.Tier,
 	}
 
-	log.Printf("📊 ScanArea response: created=%d, total=%d", len(newZones), len(allZones))
+	log.Printf("📊 ScanArea response: created=%d, visible=%d, total=%d", len(newZones), len(visibleZones), len(allZones))
 	c.JSON(http.StatusOK, response)
 }
 
-// GetNearbyZones - legacy endpoint
+// GetNearbyZones - legacy endpoint s tier filtering
 func (h *Handler) GetNearbyZones(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -168,9 +167,10 @@ func (h *Handler) GetNearbyZones(c *gin.Context) {
 	}
 
 	zones := h.getExistingZonesInArea(lat, lng, radiusKm*1000)
+	visibleZones := h.filterZonesByTier(zones, user.Tier)
 
 	var result []ZoneWithDetails
-	for _, zone := range zones {
+	for _, zone := range visibleZones {
 		details := h.buildZoneDetails(zone, lat, lng, user.Tier)
 		result = append(result, details)
 	}
@@ -183,12 +183,10 @@ func (h *Handler) GetNearbyZones(c *gin.Context) {
 	})
 }
 
-// Stub implementations for other endpoints
-func (h *Handler) EnterZone(c *gin.Context)             { h.notImplemented(c, "Enter zone") }
-func (h *Handler) ScanZone(c *gin.Context)              { h.notImplemented(c, "Scan zone") }
-func (h *Handler) CollectItem(c *gin.Context)           { h.notImplemented(c, "Collect item") }
-func (h *Handler) GetZoneDetails(c *gin.Context)        { h.notImplemented(c, "Zone details") }
-func (h *Handler) ExitZone(c *gin.Context)              { h.notImplemented(c, "Exit zone") }
+// ============================================
+// STUB IMPLEMENTATIONS
+// ============================================
+
 func (h *Handler) GetZoneStats(c *gin.Context)          { h.notImplemented(c, "Zone stats") }
 func (h *Handler) GetAvailableArtifacts(c *gin.Context) { h.notImplemented(c, "Available artifacts") }
 func (h *Handler) GetAvailableGear(c *gin.Context)      { h.notImplemented(c, "Available gear") }

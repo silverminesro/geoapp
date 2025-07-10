@@ -5,14 +5,257 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"time"
 
 	"geoanomaly/internal/common"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-// ✅ OPRAVENÉ: Zone creation with better error handling and debug
+// ============================================
+// ZONE INTERACTION ENDPOINTS
+// ============================================
+
+// GetZoneDetails - detaily konkrétnej zóny
+func (h *Handler) GetZoneDetails(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	zoneID := c.Param("id")
+	if zoneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Zone ID required"})
+		return
+	}
+
+	// Get user tier for visibility check
+	var user common.User
+	if err := h.db.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Get zone
+	var zone common.Zone
+	if err := h.db.First(&zone, "id = ? AND is_active = true", zoneID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Zone not found"})
+		return
+	}
+
+	// ✅ TIER CHECK: Only show zone if user can see it
+	if zone.TierRequired > user.Tier {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":         "Zone not accessible",
+			"message":       "Upgrade your tier to access this zone",
+			"required_tier": zone.TierRequired,
+			"your_tier":     user.Tier,
+		})
+		return
+	}
+
+	// Build detailed response
+	details := h.buildZoneDetails(zone, 0, 0, user.Tier) // No distance calculation
+
+	// Get all items in zone (filtered by tier)
+	var artifacts []common.Artifact
+	var gear []common.Gear
+	h.db.Where("zone_id = ? AND is_active = true", zone.ID).Find(&artifacts)
+	h.db.Where("zone_id = ? AND is_active = true", zone.ID).Find(&gear)
+
+	filteredArtifacts := h.filterArtifactsByTier(artifacts, user.Tier)
+	filteredGear := h.filterGearByTier(gear, user.Tier)
+
+	c.JSON(http.StatusOK, gin.H{
+		"zone":      details,
+		"artifacts": filteredArtifacts,
+		"gear":      filteredGear,
+		"can_enter": user.Tier >= zone.TierRequired,
+		"message":   "Zone details retrieved successfully",
+	})
+}
+
+// EnterZone - vstup do zóny
+func (h *Handler) EnterZone(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	zoneID := c.Param("id")
+	if zoneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Zone ID required"})
+		return
+	}
+
+	// Get user
+	var user common.User
+	if err := h.db.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Get zone
+	var zone common.Zone
+	if err := h.db.First(&zone, "id = ? AND is_active = true", zoneID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Zone not found"})
+		return
+	}
+
+	// ✅ TIER CHECK
+	if zone.TierRequired > user.Tier {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":         "Insufficient tier level",
+			"message":       "Upgrade your tier to enter this zone",
+			"required_tier": zone.TierRequired,
+			"your_tier":     user.Tier,
+		})
+		return
+	}
+
+	// Update player session
+	var session common.PlayerSession
+	if err := h.db.Where("user_id = ?", userID).First(&session).Error; err != nil {
+		// Create new session
+		session = common.PlayerSession{
+			UserID:   user.ID,
+			IsOnline: true,
+			LastSeen: time.Now(),
+		}
+	}
+
+	// Parse zone UUID
+	zoneUUID, err := uuid.Parse(zoneID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid zone ID format"})
+		return
+	}
+
+	session.CurrentZone = &zoneUUID
+	session.LastSeen = time.Now()
+	session.IsOnline = true
+
+	if err := h.db.Save(&session).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enter zone"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Successfully entered zone",
+		"zone":        zone,
+		"entered_at":  time.Now().Unix(),
+		"can_collect": true,
+		"player_tier": user.Tier,
+	})
+}
+
+// ExitZone - výstup zo zóny
+func (h *Handler) ExitZone(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Update player session - remove current zone
+	var session common.PlayerSession
+	if err := h.db.Where("user_id = ?", userID).First(&session).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Player session not found"})
+		return
+	}
+
+	session.CurrentZone = nil
+	session.LastSeen = time.Now()
+
+	if err := h.db.Save(&session).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to exit zone"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Successfully exited zone",
+		"exited_at": time.Now().Unix(),
+	})
+}
+
+// ScanZone - scan items v zóne
+func (h *Handler) ScanZone(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	zoneID := c.Param("id")
+	if zoneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Zone ID required"})
+		return
+	}
+
+	// Get user
+	var user common.User
+	if err := h.db.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Get zone
+	var zone common.Zone
+	if err := h.db.First(&zone, "id = ? AND is_active = true", zoneID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Zone not found"})
+		return
+	}
+
+	// ✅ TIER CHECK
+	if zone.TierRequired > user.Tier {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":         "Insufficient tier level",
+			"required_tier": zone.TierRequired,
+			"your_tier":     user.Tier,
+		})
+		return
+	}
+
+	// Check if player is in zone
+	var session common.PlayerSession
+	if err := h.db.Where("user_id = ? AND current_zone = ?", userID, zoneID).First(&session).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Not in zone",
+			"message": "You must enter the zone first",
+		})
+		return
+	}
+
+	// Get items in zone (filtered by tier)
+	var artifacts []common.Artifact
+	var gear []common.Gear
+
+	h.db.Where("zone_id = ? AND is_active = true", zoneID).Find(&artifacts)
+	h.db.Where("zone_id = ? AND is_active = true", zoneID).Find(&gear)
+
+	filteredArtifacts := h.filterArtifactsByTier(artifacts, user.Tier)
+	filteredGear := h.filterGearByTier(gear, user.Tier)
+
+	c.JSON(http.StatusOK, gin.H{
+		"zone":            zone,
+		"artifacts":       filteredArtifacts,
+		"gear":            filteredGear,
+		"total_artifacts": len(filteredArtifacts),
+		"total_gear":      len(filteredGear),
+		"scan_timestamp":  time.Now().Unix(),
+		"message":         "Zone scanned successfully",
+	})
+}
+
+// ============================================
+// ZONE MANAGEMENT FUNCTIONS
+// ============================================
+
+// Zone creation functions
 func (h *Handler) spawnDynamicZones(centerLat, centerLng float64, playerTier, count int) []common.Zone {
 	var zones []common.Zone
 
@@ -33,7 +276,6 @@ func (h *Handler) spawnDynamicZones(centerLat, centerLng float64, playerTier, co
 		expiryHours := ZoneMinExpiryHours + rand.Intn(ZoneMaxExpiryHours-ZoneMinExpiryHours+1)
 		expiryTime := time.Now().Add(time.Duration(expiryHours) * time.Hour)
 
-		// ✅ OPRAVENÉ: Location bez Accuracy field
 		zone := common.Zone{
 			BaseModel:    common.BaseModel{ID: uuid.New()},
 			Name:         fmt.Sprintf("%s (T%d)", zoneNames[rand.Intn(len(zoneNames))], zoneTier),
@@ -43,7 +285,6 @@ func (h *Handler) spawnDynamicZones(centerLat, centerLng float64, playerTier, co
 			Location: common.Location{
 				Latitude:  lat,
 				Longitude: lng,
-				// ❌ REMOVED: Accuracy field (database doesn't have it)
 				Timestamp: time.Now(),
 			},
 			ZoneType: "dynamic",
@@ -54,13 +295,13 @@ func (h *Handler) spawnDynamicZones(centerLat, centerLng float64, playerTier, co
 				"despawn_reason": "timer",
 				"created_at":     time.Now().Unix(),
 				"zone_type":      "dynamic",
+				"zone_category":  h.getZoneCategory(zoneTier),
 			},
 			IsActive: true,
 		}
 
 		log.Printf("💾 Creating zone %d: %s at [%.6f, %.6f]", i+1, zone.Name, lat, lng)
 
-		// ✅ OPRAVENÉ: Better error handling pre database insert
 		if err := h.db.Create(&zone).Error; err != nil {
 			log.Printf("❌ Failed to create zone %s: %v", zone.Name, err)
 			continue
@@ -81,7 +322,6 @@ func (h *Handler) spawnDynamicZones(centerLat, centerLng float64, playerTier, co
 func (h *Handler) getExistingZonesInArea(lat, lng, radiusMeters float64) []common.Zone {
 	var zones []common.Zone
 
-	// ✅ OPRAVENÉ: Simplified query bez PostGIS dependency
 	if err := h.db.Where("is_active = true").Find(&zones).Error; err != nil {
 		log.Printf("❌ Failed to query zones: %v", err)
 		return []common.Zone{}
@@ -98,6 +338,18 @@ func (h *Handler) getExistingZonesInArea(lat, lng, radiusMeters float64) []commo
 
 	log.Printf("📍 Found %d zones in area (radius: %.0fm)", len(filteredZones), radiusMeters)
 	return filteredZones
+}
+
+// ✅ Zone visibility filtering
+func (h *Handler) filterZonesByTier(zones []common.Zone, userTier int) []common.Zone {
+	var visibleZones []common.Zone
+	for _, zone := range zones {
+		if zone.TierRequired <= userTier {
+			visibleZones = append(visibleZones, zone)
+		}
+	}
+	log.Printf("🔍 Filtered zones: %d visible out of %d total (user tier: %d)", len(visibleZones), len(zones), userTier)
+	return visibleZones
 }
 
 func (h *Handler) countDynamicZonesInArea(lat, lng, radiusMeters float64) int {
@@ -151,30 +403,52 @@ func (h *Handler) buildZoneDetails(zone common.Zone, playerLat, playerLng float6
 	return details
 }
 
-// Helper functions
+// ✅ Zone limits for freemium model
 func (h *Handler) calculateMaxZones(playerTier int) int {
 	switch playerTier {
+	case 0:
+		return 1 // Free - 1 zóna len
 	case 1:
-		return 3
+		return 2 // Basic - 2 zóny
 	case 2:
-		return 5
+		return 3 // Premium - 3 zóny
 	case 3:
-		return 7
+		return 5 // Pro - 5 zón
 	case 4:
-		return 10
+		return 7 // Elite - 7 zón
 	default:
-		return 2
+		return 1
 	}
 }
 
+// ✅ Better zone tier assignment
 func (h *Handler) calculateZoneTier(playerTier int) int {
-	minTier := int(math.Max(1, float64(playerTier-1)))
-	maxTier := int(math.Min(4, float64(playerTier+1)))
-	return minTier + rand.Intn(maxTier-minTier+1)
+	// 70% chance for player tier, 30% for +1 tier
+	if rand.Float64() < 0.7 {
+		return playerTier
+	}
+	// +1 tier but max 4
+	return int(math.Min(4, float64(playerTier+1)))
+}
+
+// ✅ Zone categories
+func (h *Handler) getZoneCategory(tier int) string {
+	switch tier {
+	case 0, 1:
+		return "basic"
+	case 2, 3:
+		return "premium"
+	case 4:
+		return "elite"
+	default:
+		return "basic"
+	}
 }
 
 func (h *Handler) calculateZoneRadius(tier int) int {
 	switch tier {
+	case 0:
+		return 100 // Smaller for free
 	case 1:
 		return 150
 	case 2:
