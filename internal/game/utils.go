@@ -31,8 +31,8 @@ func (h *Handler) checkRateLimit(key string, limit int, duration time.Duration) 
 	return true
 }
 
-// Utility functions
-func calculateDistance(lat1, lon1, lat2, lon2 float64) float64 {
+// ✅ EXPORTED: Utility functions for zones package
+func CalculateDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	dlat := (lat2 - lat1) * (math.Pi / 180.0)
 	dlon := (lon2 - lon1) * (math.Pi / 180.0)
 
@@ -42,11 +42,11 @@ func calculateDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	return EarthRadiusKm * c * 1000
 }
 
-func isValidGPSCoordinate(lat, lng float64) bool {
+func IsValidGPSCoordinate(lat, lng float64) bool {
 	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
 }
 
-func formatDuration(d time.Duration) string {
+func FormatDuration(d time.Duration) string {
 	if d < time.Hour {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}

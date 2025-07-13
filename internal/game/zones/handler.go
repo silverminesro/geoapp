@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"geoanomaly/internal/common"
+	// ❌ VYMAZANÉ: "geoanomaly/internal/game"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -195,14 +196,14 @@ func (h *Handler) EnterZone(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":              "Successfully entered zone",
-		"zone_name":            zone.Name,
-		"biome":                zone.Biome,
-		"danger_level":         zone.DangerLevel,
-		"zone":                 zone,
+		"zone_name":            zone.Name,        // ✅ PRIDANÉ: zone name
+		"biome":                zone.Biome,       // ✅ PRIDANÉ: biome
+		"danger_level":         zone.DangerLevel, // ✅ PRIDANÉ: danger level
+		"zone":                 zone,             // ✅ PONECHANÉ: full zone object
 		"entered_at":           time.Now().Unix(),
 		"can_collect":          true,
 		"player_tier":          user.Tier,
-		"distance_from_center": 0,
+		"distance_from_center": 0, // ✅ PRIDANÉ: placeholder distance
 	})
 }
 
@@ -342,17 +343,6 @@ func (h *Handler) FilterZonesByTier(zones []common.Zone, userTier int) []common.
 	return visibleZones
 }
 
-func (h *Handler) CountDynamicZonesInArea(lat, lng, radiusMeters float64) int {
-	zones := h.GetExistingZonesInArea(lat, lng, radiusMeters)
-	count := 0
-	for _, zone := range zones {
-		if zone.ZoneType == "dynamic" {
-			count++
-		}
-	}
-	return count
-}
-
 // ✅ UPDATED: Enhanced zone details with biome info
 func (h *Handler) buildZoneDetails(zone common.Zone, playerLat, playerLng float64, playerTier int) ZoneWithDetails {
 	distance := calculateDistance(playerLat, playerLng, zone.Location.Latitude, zone.Location.Longitude)
@@ -373,8 +363,8 @@ func (h *Handler) buildZoneDetails(zone common.Zone, playerLat, playerLng float6
 		ActiveArtifacts: int(artifactCount),
 		ActiveGear:      int(gearCount),
 		ActivePlayers:   int(playerCount),
-		Biome:           zone.Biome,
-		DangerLevel:     zone.DangerLevel,
+		Biome:           zone.Biome,       // ✅ PRIDANÉ: Biome info
+		DangerLevel:     zone.DangerLevel, // ✅ PRIDANÉ: Danger level
 	}
 
 	// Expiry info pre dynamic zones
@@ -446,149 +436,4 @@ func (h *Handler) addDistanceToGear(gear []common.Gear, playerLat, playerLng flo
 	}
 
 	return result
-}
-
-// ============================================
-// TIER FILTERING FUNCTIONS (from filtering.go)
-// ============================================
-
-// ✅ ENHANCED: Biome-aware artifact filtering
-func (h *Handler) filterArtifactsByTier(artifacts []common.Artifact, userTier int) []common.Artifact {
-	var filtered []common.Artifact
-	for _, artifact := range artifacts {
-		// Check tier requirements
-		if !h.canCollectArtifact(artifact, userTier) {
-			continue
-		}
-
-		// Check biome access (if biome system is active)
-		if artifact.Biome != "" {
-			if !h.canAccessBiome(artifact.Biome, userTier) {
-				continue
-			}
-		}
-
-		filtered = append(filtered, artifact)
-	}
-	return filtered
-}
-
-// ✅ ENHANCED: Biome-aware gear filtering
-func (h *Handler) filterGearByTier(gear []common.Gear, userTier int) []common.Gear {
-	var filtered []common.Gear
-	for _, g := range gear {
-		// Check tier requirements
-		if !h.canCollectGear(g, userTier) {
-			continue
-		}
-
-		// Check biome access (if biome system is active)
-		if g.Biome != "" {
-			if !h.canAccessBiome(g.Biome, userTier) {
-				continue
-			}
-		}
-
-		filtered = append(filtered, g)
-	}
-	return filtered
-}
-
-// ✅ NEW: Check if user can access biome (using local constants from spawning.go)
-func (h *Handler) canAccessBiome(biome string, userTier int) bool {
-	biomeRequirements := map[string]int{
-		BiomeForest:      0,
-		BiomeMountain:    1,
-		BiomeUrban:       1,
-		BiomeWater:       1,
-		BiomeIndustrial:  2,
-		BiomeRadioactive: 3,
-		BiomeChemical:    4,
-	}
-
-	requiredTier, exists := biomeRequirements[biome]
-	if !exists {
-		return true // Unknown biome, allow access
-	}
-
-	return userTier >= requiredTier
-}
-
-// ✅ EXISTING: Artifact collection check
-func (h *Handler) canCollectArtifact(artifact common.Artifact, userTier int) bool {
-	switch userTier {
-	case 0, 1:
-		return artifact.Rarity == "common" || artifact.Rarity == "rare"
-	case 2, 3:
-		return artifact.Rarity != "legendary"
-	case 4:
-		return true // Elite tier can collect all
-	default:
-		return artifact.Rarity == "common"
-	}
-}
-
-// ✅ EXISTING: Gear collection check
-func (h *Handler) canCollectGear(gear common.Gear, userTier int) bool {
-	maxLevel := h.getMaxGearLevelForTier(userTier)
-	return gear.Level <= maxLevel
-}
-
-func (h *Handler) getMaxGearLevelForTier(userTier int) int {
-	switch userTier {
-	case 0:
-		return 2 // Free tier: max level 2
-	case 1:
-		return 4 // Basic tier: max level 4
-	case 2:
-		return 6 // Premium tier: max level 6
-	case 3:
-		return 8 // Pro tier: max level 8
-	case 4:
-		return 10 // Elite tier: max level 10
-	default:
-		return 1
-	}
-}
-
-// ✅ EXPORT functions for items.go
-func (h *Handler) CanCollectArtifact(artifact common.Artifact, userTier int) bool {
-	return h.canCollectArtifact(artifact, userTier)
-}
-
-func (h *Handler) CanCollectGear(gear common.Gear, userTier int) bool {
-	return h.canCollectGear(gear, userTier)
-}
-
-func (h *Handler) GetMaxGearLevelForTier(userTier int) int {
-	return h.getMaxGearLevelForTier(userTier)
-}
-
-func (h *Handler) GetRequiredTierForRarity(rarity string) int {
-	switch rarity {
-	case "common":
-		return 0
-	case "rare":
-		return 1
-	case "epic":
-		return 2
-	case "legendary":
-		return 4
-	default:
-		return 0
-	}
-}
-
-func (h *Handler) IsExclusiveArtifact(artifactType string) bool {
-	exclusiveArtifacts := []string{
-		"plutonium_core", "reactor_fragment", "control_rod",
-		"pure_toxin", "experimental_serum", "bio_weapon",
-	}
-
-	for _, exclusive := range exclusiveArtifacts {
-		if artifactType == exclusive {
-			return true
-		}
-	}
-	return false
 }

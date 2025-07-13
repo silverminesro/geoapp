@@ -30,6 +30,8 @@ type ZoneWithDetails struct {
 	ActivePlayers   int         `json:"active_players"`
 	ExpiresAt       *int64      `json:"expires_at,omitempty"`
 	TimeToExpiry    *string     `json:"time_to_expiry,omitempty"`
+	Biome           string      `json:"biome"`        // ✅ PRIDANÉ: Biome info
+	DangerLevel     string      `json:"danger_level"` // ✅ PRIDANÉ: Danger level
 }
 
 type LocationPoint struct {
@@ -44,6 +46,29 @@ type PlayerInZone struct {
 	Distance float64   `json:"distance_meters"`
 }
 
+// ✅ PRIDANÉ: Zone template pre biome system
+type ZoneTemplate struct {
+	Names                []string               `json:"names"`
+	Biome                string                 `json:"biome"`
+	DangerLevel          string                 `json:"danger_level"`
+	MinTierRequired      int                    `json:"min_tier_required"`
+	AllowedArtifacts     []string               `json:"allowed_artifacts"`
+	ExclusiveArtifacts   []string               `json:"exclusive_artifacts"`
+	ArtifactSpawnRates   map[string]float64     `json:"artifact_spawn_rates"`
+	GearSpawnRates       map[string]float64     `json:"gear_spawn_rates"`
+	EnvironmentalEffects map[string]interface{} `json:"environmental_effects"`
+}
+
+// ✅ PRIDANÉ: Artifact template pre biome-specific spawning
+type ArtifactTemplate struct {
+	Type        string  `json:"type"`
+	DisplayName string  `json:"display_name"`
+	Rarity      string  `json:"rarity"`
+	Biome       string  `json:"biome"`
+	Exclusive   bool    `json:"exclusive"`
+	SpawnRate   float64 `json:"spawn_rate"`
+}
+
 // Konstanty
 const (
 	EarthRadiusKm      = 6371.0
@@ -53,4 +78,23 @@ const (
 	AreaScanCooldown   = 30
 	ZoneMinExpiryHours = 10
 	ZoneMaxExpiryHours = 24
+)
+
+// ✅ PRIDANÉ: Biome konstanty
+const (
+	BiomeForest      = "forest"
+	BiomeMountain    = "mountain"
+	BiomeIndustrial  = "industrial"
+	BiomeUrban       = "urban"
+	BiomeWater       = "water"
+	BiomeRadioactive = "radioactive"
+	BiomeChemical    = "chemical"
+)
+
+// ✅ PRIDANÉ: Danger level konstanty
+const (
+	DangerLow     = "low"
+	DangerMedium  = "medium"
+	DangerHigh    = "high"
+	DangerExtreme = "extreme"
 )
