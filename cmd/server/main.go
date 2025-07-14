@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"geoanomaly/internal/common"
+	"geoanomaly/internal/game"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -17,6 +20,7 @@ import (
 var (
 	db        *gorm.DB
 	startTime time.Time
+	scheduler *game.Scheduler
 )
 
 func init() {
@@ -67,7 +71,16 @@ func main() {
 	// Skip Redis for now
 	log.Println("⚠️  Redis disabled for testing - focusing on database")
 
-	// Setup routes - FIXED: Only call, no definition here
+	// ✅ NEW: Start zone cleanup scheduler
+	log.Println("🕐 Starting Zone TTL Cleanup Scheduler...")
+	scheduler = game.NewScheduler(db)
+	scheduler.Start()
+	log.Println("✅ Zone cleanup scheduler started (5min interval)")
+
+	// Setup graceful shutdown
+	setupGracefulShutdown()
+
+	// Setup routes
 	router := setupRoutes(db)
 
 	// Get server configuration from .env
@@ -81,10 +94,40 @@ func main() {
 	serverAddr := fmt.Sprintf("%s:%s", host, port)
 	log.Printf("🌐 Server starting on %s", serverAddr)
 	log.Printf("📱 Flutter can connect to: http://%s/api/v1", serverAddr)
+	log.Printf("🧹 Zone cleanup running every 5 minutes")
 
 	if err := router.Run(serverAddr); err != nil {
 		log.Fatalf("❌ Server failed to start: %v", err)
 	}
+}
+
+// ✅ NEW: Setup graceful shutdown
+func setupGracefulShutdown() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		log.Println("\n🛑 Shutting down server gracefully...")
+
+		// Stop scheduler
+		if scheduler != nil {
+			scheduler.Stop()
+			log.Println("✅ Zone cleanup scheduler stopped")
+		}
+
+		// Close database connection
+		if db != nil {
+			sqlDB, err := db.DB()
+			if err == nil {
+				sqlDB.Close()
+				log.Println("✅ Database connection closed")
+			}
+		}
+
+		log.Println("👋 Server shutdown complete")
+		os.Exit(0)
+	}()
 }
 
 func initDB() (*gorm.DB, error) {
@@ -108,8 +151,6 @@ func initDB() (*gorm.DB, error) {
 
 	return db, nil
 }
-
-// ❌ REMOVED: setupRoutes function deleted from here to avoid duplicate declaration
 
 func testEnvConfig() error {
 	log.Println("🔍 Testing .env configuration...")
@@ -261,10 +302,11 @@ func printServerInfo(host, port string) {
 		}
 		return "❌ No"
 	}())
+	fmt.Printf("🧹 Zone Cleanup:  ✅ Active (5min)\n")
 	fmt.Printf("🚀 Status:        Ready for connections\n")
 	fmt.Println(separator)
 
-	// Test endpoints
+	// ✅ ENHANCED: Test endpoints with cleanup endpoints
 	fmt.Println("\n🧪 TEST ENDPOINTS:")
 	fmt.Printf("Health:   GET  http://%s:%s/health\n", host, port)
 	fmt.Printf("Info:     GET  http://%s:%s/info\n", host, port)
@@ -274,13 +316,20 @@ func printServerInfo(host, port string) {
 	fmt.Printf("Users:    GET  http://%s:%s/api/v1/users\n", host, port)
 	fmt.Printf("Zones:    GET  http://%s:%s/api/v1/zones\n", host, port)
 
+	fmt.Println("\n🧹 CLEANUP ENDPOINTS:")
+	fmt.Printf("Manual Cleanup: POST http://%s:%s/api/v1/admin/zones/cleanup\n", host, port)
+	fmt.Printf("Expired Zones:  GET  http://%s:%s/api/v1/admin/zones/expired\n", host, port)
+	fmt.Printf("Zone Analytics: GET  http://%s:%s/api/v1/admin/analytics/zones\n", host, port)
+
 	fmt.Println("\n💾 DATABASE STATUS:")
 	fmt.Println("• All main tables exist")
 	fmt.Println("• 5 tier definitions configured")
 	fmt.Println("• 200 level definitions configured")
 	fmt.Println("• Schema validation passed")
+	fmt.Println("• TTL cleanup scheduler active")
 
 	fmt.Println("\n🔥 Server Ready! Test endpoints now!")
-	fmt.Println("💡 Try: curl http://localhost:8080/health")
+	fmt.Printf("💡 Try: curl http://%s:%s/health\n", host, port)
+	fmt.Printf("🧹 Zone cleanup runs every 5 minutes automatically\n")
 	fmt.Println(separator + "\n")
 }

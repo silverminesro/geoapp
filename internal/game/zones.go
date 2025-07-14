@@ -1,7 +1,6 @@
 package game
 
 import (
-	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -96,99 +95,50 @@ func (h *Handler) buildZoneDetails(zone common.Zone, playerLat, playerLng float6
 		DangerLevel:     zone.DangerLevel,
 	}
 
-	// Expiry info pre dynamic zones
-	if zone.ZoneType == "dynamic" {
-		if expiryTime, exists := zone.Properties["expires_at"]; exists {
-			if expiryTimestamp, ok := expiryTime.(float64); ok {
-				expiry := int64(expiryTimestamp)
-				details.ExpiresAt = &expiry
+	// ✅ NEW: TTL info for zones with ExpiresAt
+	if zone.ExpiresAt != nil {
+		expiry := zone.ExpiresAt.Unix()
+		details.ExpiresAt = &expiry
 
-				timeLeft := time.Until(time.Unix(expiry, 0))
-				if timeLeft > 0 {
-					timeLeftStr := FormatDuration(timeLeft)
-					details.TimeToExpiry = &timeLeftStr
-				}
-			}
+		timeLeft := zone.TimeUntilExpiry()
+		if timeLeft > 0 {
+			timeLeftStr := FormatDuration(timeLeft)
+			details.TimeToExpiry = &timeLeftStr
 		}
 	}
 
 	return details
 }
 
-// Zone spawning functions
-func (h *Handler) spawnDynamicZones(centerLat, centerLng float64, playerTier, count int) []common.Zone {
-	var zones []common.Zone
-
-	log.Printf("🏗️ Starting zone creation: lat=%.6f, lng=%.6f, tier=%d, count=%d", centerLat, centerLng, playerTier, count)
-
-	// Get available biomes for player tier
-	availableBiomes := h.getAvailableBiomes(playerTier)
-	log.Printf("🎯 Available biomes for tier %d: %v", playerTier, availableBiomes)
-
-	for i := 0; i < count; i++ {
-		// Select random biome
-		biome := availableBiomes[rand.Intn(len(availableBiomes))]
-		template := GetZoneTemplate(biome)
-
-		// Select random name from template
-		zoneName := template.Names[rand.Intn(len(template.Names))]
-
-		// Random pozícia v rámci 7km
-		lat, lng := h.generateRandomPosition(centerLat, centerLng, AreaScanRadius)
-		zoneTier := h.calculateZoneTier(playerTier, template.MinTierRequired)
-
-		// Expiry time
-		expiryHours := ZoneMinExpiryHours + rand.Intn(ZoneMaxExpiryHours-ZoneMinExpiryHours+1)
-		expiryTime := time.Now().Add(time.Duration(expiryHours) * time.Hour)
-
-		zone := common.Zone{
-			BaseModel:    common.BaseModel{ID: uuid.New()},
-			Name:         fmt.Sprintf("%s (T%d)", zoneName, zoneTier),
-			Description:  fmt.Sprintf("%s zone - %s danger level", template.Biome, template.DangerLevel),
-			RadiusMeters: h.calculateZoneRadius(zoneTier),
-			TierRequired: zoneTier,
-			Location: common.Location{
-				Latitude:  lat,
-				Longitude: lng,
-				Timestamp: time.Now(),
-			},
-			ZoneType:    "dynamic",
-			Biome:       biome,
-			DangerLevel: template.DangerLevel,
-			Properties: common.JSONB{
-				"spawned_by":            "player_scan",
-				"expires_at":            expiryTime.Unix(),
-				"spawn_tier":            playerTier,
-				"despawn_reason":        "timer",
-				"created_at":            time.Now().Unix(),
-				"zone_type":             "dynamic",
-				"zone_category":         h.getZoneCategory(zoneTier),
-				"biome":                 biome,
-				"danger_level":          template.DangerLevel,
-				"environmental_effects": template.EnvironmentalEffects,
-			},
-			IsActive: true,
-		}
-
-		log.Printf("💾 Creating %s zone %d: %s at [%.6f, %.6f]", biome, i+1, zone.Name, lat, lng)
-
-		if err := h.db.Create(&zone).Error; err != nil {
-			log.Printf("❌ Failed to create zone %s: %v", zone.Name, err)
-			continue
-		}
-
-		log.Printf("✅ Zone created successfully: %s (ID: %s)", zone.Name, zone.ID)
-
-		// Spawn biome-specific items
-		h.spawnBiomeSpecificItems(zone.ID, biome, zoneTier)
-
-		zones = append(zones, zone)
+func (h *Handler) calculateZoneRadius(tier int) int {
+	switch tier {
+	case 0:
+		return 100
+	case 1:
+		return 150
+	case 2:
+		return 200
+	case 3:
+		return 250
+	case 4:
+		return 300
+	default:
+		return 100
 	}
-
-	log.Printf("🎯 Zone creation completed: %d/%d zones created successfully", len(zones), count)
-	return zones
 }
 
+func (h *Handler) generateRandomPosition(centerLat, centerLng, radiusMeters float64) (float64, float64) {
+	angle := rand.Float64() * 2 * math.Pi
+	distance := rand.Float64() * radiusMeters
+	earthRadius := 6371000.0
+
+	latOffset := (distance * math.Cos(angle)) / earthRadius * (180 / math.Pi)
+	lngOffset := (distance * math.Sin(angle)) / earthRadius * (180 / math.Pi) / math.Cos(centerLat*math.Pi/180)
+
+	return centerLat + latOffset, centerLng + lngOffset
+}
+
+// ✅ SIMPLIFIED: Keep only essential functions, remove duplicates
 func (h *Handler) getAvailableBiomes(playerTier int) []string {
 	biomes := []string{BiomeForest} // Forest always available
 
@@ -233,77 +183,7 @@ func (h *Handler) getZoneCategory(tier int) string {
 	}
 }
 
-func (h *Handler) calculateZoneRadius(tier int) int {
-	switch tier {
-	case 0:
-		return 100
-	case 1:
-		return 150
-	case 2:
-		return 200
-	case 3:
-		return 250
-	case 4:
-		return 300
-	default:
-		return 100
-	}
-}
-
-func (h *Handler) generateRandomPosition(centerLat, centerLng, radiusMeters float64) (float64, float64) {
-	angle := rand.Float64() * 2 * math.Pi
-	distance := rand.Float64() * radiusMeters
-	earthRadius := 6371000.0
-
-	latOffset := (distance * math.Cos(angle)) / earthRadius * (180 / math.Pi)
-	lngOffset := (distance * math.Sin(angle)) / earthRadius * (180 / math.Pi) / math.Cos(centerLat*math.Pi/180)
-
-	return centerLat + latOffset, centerLng + lngOffset
-}
-
-func (h *Handler) spawnBiomeSpecificItems(zoneID uuid.UUID, biome string, tier int) {
-	template := GetZoneTemplate(biome)
-
-	log.Printf("🎁 Spawning biome-specific items for %s zone %s (tier %d)", biome, zoneID, tier)
-
-	// Spawn 2-4 artifacts
-	minArtifacts := 2
-	maxArtifacts := 4
-	artifactCount := rand.Intn(maxArtifacts-minArtifacts+1) + minArtifacts
-
-	availableArtifacts := make([]string, 0)
-	for artifactType := range template.ArtifactSpawnRates {
-		availableArtifacts = append(availableArtifacts, artifactType)
-	}
-
-	// Spawn guaranteed artifacts
-	for i := 0; i < artifactCount && len(availableArtifacts) > 0; i++ {
-		artifactType := availableArtifacts[rand.Intn(len(availableArtifacts))]
-		if err := h.spawnSpecificArtifact(zoneID, artifactType, biome, tier); err != nil {
-			log.Printf("⚠️ Failed to spawn %s artifact: %v", artifactType, err)
-		}
-	}
-
-	// Spawn exclusive artifacts
-	for _, exclusive := range template.ExclusiveArtifacts {
-		if rand.Float64() < 0.3 {
-			h.spawnSpecificArtifact(zoneID, exclusive, biome, tier)
-		}
-	}
-
-	// Spawn gear
-	gearCount := rand.Intn(4)
-	availableGear := make([]string, 0)
-	for gearType := range template.GearSpawnRates {
-		availableGear = append(availableGear, gearType)
-	}
-
-	for i := 0; i < gearCount && len(availableGear) > 0; i++ {
-		gearType := availableGear[rand.Intn(len(availableGear))]
-		h.spawnSpecificGear(zoneID, gearType, biome, tier)
-	}
-}
-
+// Keep existing biome-specific spawning functions
 func (h *Handler) spawnSpecificArtifact(zoneID uuid.UUID, artifactType, biome string, tier int) error {
 	var zone common.Zone
 	if err := h.db.First(&zone, "id = ?", zoneID).Error; err != nil {
@@ -347,7 +227,7 @@ func (h *Handler) spawnSpecificGear(zoneID uuid.UUID, gearType, biome string, ti
 	}
 
 	displayName := GetGearDisplayName(gearType)
-	level := tier + rand.Intn(2)
+	level := tier + rand.Intn(2) + 1
 
 	lat, lng := h.generateRandomPosition(zone.Location.Latitude, zone.Location.Longitude, float64(zone.RadiusMeters))
 

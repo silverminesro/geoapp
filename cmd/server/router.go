@@ -14,10 +14,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// ✅ FIXED: Changed signature to match main.go call (removed redis parameter)
+// ✅ FIXED: Removed zones import - all functionality is now in game package
 func setupRoutes(db *gorm.DB) *gin.Engine {
-	// Set Gin mode
-	gin.SetMode(gin.ReleaseMode) // Pre production
+	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 
@@ -25,41 +24,42 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	router.Use(middleware.Logger())
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
-	// ❌ Commented out for now: router.Use(middleware.RateLimit(redisClient))
 
-	// ✅ FIXED: Initialize handlers without Redis (pass nil for now)
-	authHandler := auth.NewHandler(db, nil)         // nil instead of redisClient
-	userHandler := user.NewHandler(db, nil)         // nil instead of redisClient
-	gameHandler := game.NewHandler(db, nil)         // nil instead of redisClient
-	locationHandler := location.NewHandler(db, nil) // nil instead of redisClient
+	// ✅ SIMPLIFIED: Only main handlers (zones functionality merged into game)
+	authHandler := auth.NewHandler(db, nil)
+	userHandler := user.NewHandler(db, nil)
+	gameHandler := game.NewHandler(db, nil) // ✅ Contains all game + zones functionality
+	locationHandler := location.NewHandler(db, nil)
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":     "healthy",
 			"timestamp":  time.Now().Format(time.RFC3339),
-			"version":    "0.0.5",
+			"version":    "1.0.0",
 			"service":    "geoanomaly-backend",
 			"created_by": "silverminesro",
+			"structure":  "unified", // ✅ UPDATED
 		})
 	})
 
-	// Basic info endpoint (merge from main.go)
+	// Basic info endpoint
 	router.GET("/info", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"name":        "GeoAnomaly Backend",
-			"version":     "0.0.5",
+			"version":     "1.0.0",
 			"environment": getEnvVar("APP_ENV", "development"),
 			"uptime":      time.Since(startTime).String(),
 			"developer":   "silverminesro",
 			"database":    getEnvVar("DB_NAME", "geoanomaly") + "@" + getEnvVar("DB_HOST", "localhost"),
+			"structure":   "unified", // ✅ UPDATED
 		})
 	})
 
 	// API v1 group
 	v1 := router.Group("/api/" + getEnvVar("API_VERSION", "v1"))
 	{
-		// Basic test endpoints (merge from main.go)
+		// Basic test endpoints
 		v1.GET("/test", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"message":   "🎮 GeoAnomaly API is working perfectly!",
@@ -67,17 +67,17 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 				"endpoint":  "/api/v1/test",
 				"developer": "silverminesro",
 				"status":    "operational",
+				"version":   "unified-structure", // ✅ UPDATED
 			})
 		})
 
-		// Database test endpoint (merge from main.go)
+		// Database test endpoint
 		v1.GET("/db-test", func(c *gin.Context) {
 			var tierCount int64
 			var levelCount int64
 			var userCount int64
 			var zoneCount int64
 
-			// Query existing data
 			db.Raw("SELECT COUNT(*) FROM tier_definitions").Scan(&tierCount)
 			db.Raw("SELECT COUNT(*) FROM level_definitions").Scan(&levelCount)
 			db.Model(&common.User{}).Count(&userCount)
@@ -97,7 +97,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			})
 		})
 
-		// User test endpoint (merge from main.go)
+		// User test endpoint
 		v1.GET("/users", func(c *gin.Context) {
 			var users []common.User
 			result := db.Limit(10).Find(&users)
@@ -119,7 +119,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			})
 		})
 
-		// Zone test endpoint (merge from main.go)
+		// Zone test endpoint
 		v1.GET("/zones", func(c *gin.Context) {
 			var zones []common.Zone
 			result := db.Limit(10).Find(&zones)
@@ -141,9 +141,8 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			})
 		})
 
-		// Server status endpoint (merge from main.go)
+		// Server status endpoint
 		v1.GET("/status", func(c *gin.Context) {
-			// Quick database ping
 			sqlDB, err := db.DB()
 			var dbStatus string
 			if err != nil {
@@ -162,6 +161,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 					"uptime":      time.Since(startTime).String(),
 					"environment": getEnvVar("APP_ENV", "development"),
 					"version":     "1.0.0",
+					"structure":   "unified", // ✅ UPDATED
 				},
 				"database": gin.H{
 					"status": dbStatus,
@@ -182,7 +182,6 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 		authRoutes.POST("/register", authHandler.Register)
 		authRoutes.POST("/login", authHandler.Login)
 
-		// Protected auth routes
 		authProtected := authRoutes.Group("/")
 		authProtected.Use(middleware.JWTAuth())
 		{
@@ -197,44 +196,38 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	userRoutes := v1.Group("/user")
 	userRoutes.Use(middleware.JWTAuth())
 	{
-		// Profile management
 		userRoutes.GET("/profile", userHandler.GetProfile)
 		userRoutes.PUT("/profile", userHandler.UpdateProfile)
-
-		// Inventory management
 		userRoutes.GET("/inventory", userHandler.GetInventory)
-		userRoutes.GET("/inventory/:type", userHandler.GetInventoryByType) // artifacts, gear
-
-		// Location updates
+		userRoutes.GET("/inventory/:type", userHandler.GetInventoryByType)
 		userRoutes.POST("/location", userHandler.UpdateLocation)
 		userRoutes.GET("/location/history", userHandler.GetLocationHistory)
-
-		// User stats
 		userRoutes.GET("/stats", userHandler.GetUserStats)
 	}
 
 	// ==========================================
 	// 🎮 GAME ROUTES (Protected - JWT required)
+	// ✅ ALL HANDLED BY SINGLE gameHandler
 	// ==========================================
 	gameRoutes := v1.Group("/game")
 	gameRoutes.Use(middleware.JWTAuth())
 	{
-		// ✨ NOVÝ DYNAMIC ZONE SYSTEM ✨
-		gameRoutes.POST("/scan-area", gameHandler.ScanArea) // 🔥 HLAVNÝ ENDPOINT
+		// ✨ MAIN GAME ENDPOINTS
+		gameRoutes.POST("/scan-area", gameHandler.ScanArea) // 🔥 PRIMARY ENDPOINT
 
-		// Zone management
+		// ✅ UNIFIED: Zone management - all handled by gameHandler
 		zoneRoutes := gameRoutes.Group("/zones")
 		{
-			// Discovery (legacy support)
+			// Zone discovery
 			zoneRoutes.GET("/nearby", gameHandler.GetNearbyZones)
-			zoneRoutes.GET("/:id", gameHandler.GetZoneDetails)
 
-			// Zone interaction
+			// Zone interaction (previously in zones package, now in game)
+			zoneRoutes.GET("/:id", gameHandler.GetZoneDetails)
 			zoneRoutes.POST("/:id/enter", gameHandler.EnterZone)
 			zoneRoutes.POST("/:id/exit", gameHandler.ExitZone)
-
-			// Scanning & Collecting
 			zoneRoutes.GET("/:id/scan", gameHandler.ScanZone)
+
+			// Item collection
 			zoneRoutes.POST("/:id/collect", gameHandler.CollectItem)
 
 			// Zone stats
@@ -249,7 +242,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			itemRoutes.POST("/use/:id", gameHandler.UseItem)
 		}
 
-		// Leaderboards & Statistics
+		// Game statistics
 		gameRoutes.GET("/leaderboard", gameHandler.GetLeaderboard)
 		gameRoutes.GET("/stats", gameHandler.GetGameStats)
 	}
@@ -260,19 +253,12 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	locationRoutes := v1.Group("/location")
 	locationRoutes.Use(middleware.JWTAuth())
 	{
-		// Real-time location tracking
 		locationRoutes.POST("/update", locationHandler.UpdateLocation)
 		locationRoutes.GET("/nearby", locationHandler.GetNearbyPlayers)
-
-		// Zone-specific multiplayer
 		locationRoutes.GET("/zones/:id/activity", locationHandler.GetZoneActivity)
 		locationRoutes.GET("/zones/:id/players", locationHandler.GetPlayersInZone)
-
-		// Player tracking & history
 		locationRoutes.GET("/history", locationHandler.GetLocationHistory)
 		locationRoutes.GET("/heatmap", locationHandler.GetLocationHeatmap)
-
-		// Social features
 		locationRoutes.POST("/share", locationHandler.ShareLocation)
 		locationRoutes.GET("/friends/nearby", locationHandler.GetNearbyFriends)
 	}
@@ -284,16 +270,16 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	adminRoutes.Use(middleware.JWTAuth())
 	adminRoutes.Use(middleware.AdminOnly())
 	{
-		// Static/Event zone management
+		// Zone management
 		adminRoutes.POST("/zones", gameHandler.CreateEventZone)
 		adminRoutes.PUT("/zones/:id", gameHandler.UpdateZone)
 		adminRoutes.DELETE("/zones/:id", gameHandler.DeleteZone)
 
-		// Manual item spawning
+		// Item spawning
 		adminRoutes.POST("/zones/:id/spawn/artifact", gameHandler.SpawnArtifact)
 		adminRoutes.POST("/zones/:id/spawn/gear", gameHandler.SpawnGear)
 
-		// Zone cleanup & maintenance
+		// Zone maintenance
 		adminRoutes.POST("/zones/cleanup", gameHandler.CleanupExpiredZones)
 		adminRoutes.GET("/zones/expired", gameHandler.GetExpiredZones)
 
@@ -303,18 +289,17 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 		adminRoutes.POST("/users/:id/ban", userHandler.BanUser)
 		adminRoutes.POST("/users/:id/unban", userHandler.UnbanUser)
 
-		// System analytics
+		// Analytics
 		adminRoutes.GET("/analytics/zones", gameHandler.GetZoneAnalytics)
 		adminRoutes.GET("/analytics/players", userHandler.GetPlayerAnalytics)
 		adminRoutes.GET("/analytics/items", gameHandler.GetItemAnalytics)
 	}
 
 	// ==========================================
-	// 🛠️ SYSTEM ROUTES (Monitoring & Maintenance)
+	// 🛠️ SYSTEM ROUTES
 	// ==========================================
 	systemRoutes := v1.Group("/system")
 	{
-		// Health checks
 		systemRoutes.GET("/health", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"status":    "healthy",
@@ -322,28 +307,48 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 				"database":  "connected",
 				"redis":     "disabled",
 				"version":   "1.0.0",
+				"structure": "unified",
 			})
 		})
 
-		// Server statistics
 		systemRoutes.GET("/stats", func(c *gin.Context) {
 			c.JSON(200, gin.H{
-				"active_players":  0,       // TODO: Implementovať
-				"total_zones":     0,       // TODO: Implementovať
-				"dynamic_zones":   0,       // TODO: Implementovať
-				"static_zones":    0,       // TODO: Implementovať
-				"total_artifacts": 0,       // TODO: Implementovať
-				"total_gear":      0,       // TODO: Implementovať
-				"server_uptime":   "0s",    // TODO: Implementovať
-				"last_cleanup":    "never", // TODO: Implementovať
+				"active_players":  0,
+				"total_zones":     0,
+				"dynamic_zones":   0,
+				"static_zones":    0,
+				"total_artifacts": 0,
+				"total_gear":      0,
+				"server_uptime":   "0s",
+				"last_cleanup":    "never",
 			})
 		})
 
-		// API documentation
+		// ✅ UPDATED: API documentation with unified structure
 		systemRoutes.GET("/endpoints", func(c *gin.Context) {
 			c.JSON(200, gin.H{
-				"message": "GeoAnomaly API Endpoints",
-				"version": "1.0.0",
+				"message":   "GeoAnomaly API Endpoints",
+				"version":   "1.0.0",
+				"structure": "unified",
+				"packages": gin.H{
+					"game":     "🎮 All game logic (zones, items, artifacts, gear, biomes)",
+					"auth":     "🔐 Authentication & authorization",
+					"user":     "👤 User profiles & inventory management",
+					"location": "📍 Real-time location tracking & multiplayer",
+				},
+				"file_structure": gin.H{
+					"internal/game/": gin.H{
+						"handler.go":   "Main game endpoints (scan, enter, collect)",
+						"zones.go":     "Zone creation & management",
+						"artifacts.go": "Artifact definitions & filtering",
+						"gear.go":      "Gear definitions & filtering",
+						"biomes.go":    "Biome templates & zone names",
+						"constants.go": "All game constants",
+						"types.go":     "Type definitions",
+						"utils.go":     "Utility functions",
+						"filtering.go": "Tier filtering logic",
+					},
+				},
 				"endpoints": gin.H{
 					"auth": gin.H{
 						"POST /auth/register": "Register new user",
@@ -353,11 +358,15 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 					},
 					"game": gin.H{
 						"POST /game/scan-area":          "🔥 Scan area for dynamic zones",
-						"GET /game/zones/nearby":        "Get nearby zones (legacy)",
+						"GET /game/zones/nearby":        "Get nearby zones",
+						"GET /game/zones/{id}":          "Get zone details",
 						"POST /game/zones/{id}/enter":   "Enter zone",
+						"POST /game/zones/{id}/exit":    "Exit zone",
 						"GET /game/zones/{id}/scan":     "Scan zone for items",
 						"POST /game/zones/{id}/collect": "Collect item from zone",
 						"GET /game/leaderboard":         "Get leaderboard",
+						"GET /game/items/artifacts":     "Get available artifacts",
+						"GET /game/items/gear":          "Get available gear",
 					},
 					"location": gin.H{
 						"POST /location/update":             "Update player location",
@@ -376,12 +385,11 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	}
 
 	// ==========================================
-	// 📊 METRICS ROUTES (For monitoring tools)
+	// 📊 METRICS ROUTES
 	// ==========================================
 	metricsRoutes := v1.Group("/metrics")
 	{
 		metricsRoutes.GET("/prometheus", func(c *gin.Context) {
-			// TODO: Implementovať Prometheus metrics
 			c.String(200, "# GeoAnomaly Metrics\n# Coming soon...")
 		})
 	}
@@ -389,19 +397,17 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	// ==========================================
 	// 🚫 ERROR HANDLERS
 	// ==========================================
-
-	// 404 Handler
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(404, gin.H{
-			"error":   "Endpoint not found",
-			"path":    c.Request.URL.Path,
-			"method":  c.Request.Method,
-			"message": "The requested API endpoint does not exist",
-			"hint":    "Visit /api/v1/system/endpoints for available endpoints",
+			"error":     "Endpoint not found",
+			"path":      c.Request.URL.Path,
+			"method":    c.Request.Method,
+			"message":   "The requested API endpoint does not exist",
+			"hint":      "Visit /api/v1/system/endpoints for available endpoints",
+			"structure": "unified",
 		})
 	})
 
-	// 405 Method Not Allowed Handler
 	router.NoMethod(func(c *gin.Context) {
 		c.JSON(405, gin.H{
 			"error":   "Method not allowed",

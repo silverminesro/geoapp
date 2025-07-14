@@ -55,6 +55,35 @@ type PlayerInZone struct {
 	Distance float64   `json:"distance_meters"`
 }
 
+// ✅ NEW: Session tracking structures
+type SessionTracker struct {
+	EnteredAt      time.Time `json:"entered_at"`
+	ItemsCollected int       `json:"items_collected"`
+	XPGained       int       `json:"xp_gained"`
+	ZoneID         string    `json:"zone_id"`
+	ZoneName       string    `json:"zone_name"`
+	LastActivity   time.Time `json:"last_activity"`
+}
+
+type ExitZoneResponse struct {
+	Message        string       `json:"message"`
+	ExitedAt       int64        `json:"exited_at"`
+	ZoneName       string       `json:"zone_name"`
+	TimeInZone     string       `json:"time_in_zone"`
+	ItemsCollected int          `json:"items_collected"`
+	XPGained       int          `json:"xp_gained"`
+	TotalXPGained  int          `json:"total_xp_gained"`
+	SessionStats   SessionStats `json:"session_stats"`
+}
+
+type SessionStats struct {
+	EnteredAt           int64   `json:"entered_at"`
+	DurationSeconds     int     `json:"duration_seconds"`
+	AverageItemsPerHour float64 `json:"average_items_per_hour"`
+	BiomeExplored       string  `json:"biome_explored"`
+	DangerLevelFaced    string  `json:"danger_level_faced"`
+}
+
 type ZoneTemplate struct {
 	Names                []string               `json:"names"`
 	Biome                string                 `json:"biome"`

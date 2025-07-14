@@ -3,11 +3,13 @@ package game
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
 
 	"geoanomaly/internal/common"
+	"geoanomaly/internal/xp"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -93,6 +95,82 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// ✅ ENHANCED: spawnDynamicZones with TTL system
+func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []common.Zone {
+	var newZones []common.Zone
+
+	for i := 0; i < count; i++ {
+		// ✅ NEW: Random TTL between 6-24 hours
+		minTTL := 6 * time.Hour
+		maxTTL := 24 * time.Hour
+		ttlRange := maxTTL - minTTL
+		randomTTL := minTTL + time.Duration(rand.Float64()*float64(ttlRange))
+
+		// Calculate expiry time
+		expiresAt := time.Now().Add(randomTTL)
+
+		// Generate biome for this tier
+		biome := h.selectBiome(tier)
+
+		zone := common.Zone{
+			BaseModel: common.BaseModel{ID: uuid.New()},
+			Name:      h.generateZoneName(tier),
+			Location: common.Location{
+				Latitude:  lat + (rand.Float64()-0.5)*0.01,
+				Longitude: lng + (rand.Float64()-0.5)*0.01,
+				Timestamp: time.Now(),
+			},
+			TierRequired: tier,
+			RadiusMeters: h.calculateZoneRadius(tier),
+			IsActive:     true,
+			ZoneType:     "dynamic",
+			Biome:        biome,
+			DangerLevel:  h.calculateDangerLevel(tier),
+
+			// ✅ NEW: TTL fields
+			ExpiresAt:    &expiresAt,
+			LastActivity: time.Now(),
+			AutoCleanup:  true,
+
+			Properties: common.JSONB{
+				"spawned_by":   "scan_area",
+				"ttl_hours":    randomTTL.Hours(),
+				"biome":        biome,
+				"danger_level": h.calculateDangerLevel(tier),
+			},
+		}
+
+		if err := h.db.Create(&zone).Error; err == nil {
+			// Spawn items in new zone
+			h.spawnItemsInZone(zone.ID, tier, zone.Biome)
+			newZones = append(newZones, zone)
+
+			log.Printf("🏰 Zone spawned: %s (TTL: %.1fh, expires: %s)",
+				zone.Name, randomTTL.Hours(), expiresAt.Format("15:04"))
+		} else {
+			log.Printf("❌ Failed to create zone: %v", err)
+		}
+	}
+
+	return newZones
+}
+
+// ✅ NEW: Helper function for danger level calculation
+func (h *Handler) calculateDangerLevel(tier int) string {
+	switch tier {
+	case 0, 1:
+		return "low"
+	case 2:
+		return "medium"
+	case 3:
+		return "high"
+	case 4:
+		return "extreme"
+	default:
+		return "low"
+	}
 }
 
 // GetNearbyZones - získanie zón v okolí
@@ -207,7 +285,7 @@ func (h *Handler) GetZoneDetails(c *gin.Context) {
 	})
 }
 
-// EnterZone - vstup do zóny
+// ✅ ENHANCED: EnterZone with activity tracking
 func (h *Handler) EnterZone(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -246,6 +324,9 @@ func (h *Handler) EnterZone(c *gin.Context) {
 		return
 	}
 
+	// ✅ NEW: Update zone activity
+	h.updateZoneActivity(zone.ID)
+
 	// Update player session
 	var session common.PlayerSession
 	if err := h.db.Where("user_id = ?", userID).First(&session).Error; err != nil {
@@ -283,10 +364,17 @@ func (h *Handler) EnterZone(c *gin.Context) {
 		"can_collect":          true,
 		"player_tier":          user.Tier,
 		"distance_from_center": 0,
+		"ttl_status":           zone.TTLStatus(),
+		"expires_in_seconds":   int64(zone.TimeUntilExpiry().Seconds()),
 	})
 }
 
-// ExitZone - výstup zo zóny
+// ✅ NEW: Helper function to update zone activity
+func (h *Handler) updateZoneActivity(zoneID uuid.UUID) {
+	h.db.Model(&common.Zone{}).Where("id = ?", zoneID).Update("last_activity", time.Now())
+}
+
+// ✅ ENHANCED ExitZone - výstup zo zóny s kompletným trackingom
 func (h *Handler) ExitZone(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -294,13 +382,31 @@ func (h *Handler) ExitZone(c *gin.Context) {
 		return
 	}
 
-	// Update player session - remove current zone
+	// Get player session with zone info
 	var session common.PlayerSession
-	if err := h.db.Where("user_id = ?", userID).First(&session).Error; err != nil {
+	if err := h.db.Preload("Zone").Where("user_id = ?", userID).First(&session).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Player session not found"})
 		return
 	}
 
+	// ✅ ENHANCED: Extract zone information before clearing
+	zoneName, biome, dangerLevel, zoneTier := h.getZoneInfo(session.CurrentZone)
+
+	// ✅ ENHANCED: Calculate session statistics
+	timeInZone := time.Since(session.CreatedAt)
+	itemsCollected := h.getSessionItemsCollected(userID.(uuid.UUID), session.CurrentZone, session.CreatedAt)
+	xpGained := h.calculateXPGained(itemsCollected, zoneTier, biome)
+
+	// ✅ ENHANCED: Build comprehensive session stats
+	sessionStats := SessionStats{
+		EnteredAt:           session.CreatedAt.Unix(),
+		DurationSeconds:     int(timeInZone.Seconds()),
+		AverageItemsPerHour: h.calculateItemsPerHour(itemsCollected, timeInZone),
+		BiomeExplored:       biome,
+		DangerLevelFaced:    dangerLevel,
+	}
+
+	// Clear current zone
 	session.CurrentZone = nil
 	session.LastSeen = time.Now()
 
@@ -309,10 +415,24 @@ func (h *Handler) ExitZone(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "Successfully exited zone",
-		"exited_at": time.Now().Unix(),
-	})
+	// ✅ ENHANCED: Award XP to user (if we want to implement XP system)
+	if xpGained > 0 {
+		h.db.Model(&common.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", xpGained))
+	}
+
+	// ✅ ENHANCED: Complete exit response
+	response := ExitZoneResponse{
+		Message:        "Successfully exited zone",
+		ExitedAt:       time.Now().Unix(),
+		ZoneName:       zoneName,
+		TimeInZone:     h.formatDurationDetailed(timeInZone),
+		ItemsCollected: itemsCollected,
+		XPGained:       xpGained,
+		TotalXPGained:  xpGained, // Could be lifetime total if we track it
+		SessionStats:   sessionStats,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // ScanZone - scan items v zóne
@@ -363,6 +483,9 @@ func (h *Handler) ScanZone(c *gin.Context) {
 		return
 	}
 
+	// ✅ NEW: Update zone activity on scan
+	h.updateZoneActivity(zone.ID)
+
 	// Get items in zone (filtered by tier)
 	var artifacts []common.Artifact
 	var gear []common.Gear
@@ -382,10 +505,12 @@ func (h *Handler) ScanZone(c *gin.Context) {
 		"total_gear":      len(filteredGear),
 		"scan_timestamp":  time.Now().Unix(),
 		"message":         "Zone scanned successfully",
+		"ttl_status":      zone.TTLStatus(),
+		"expires_in":      int64(zone.TimeUntilExpiry().Seconds()),
 	})
 }
 
-// CollectItem - zber artefakt/gear
+// ✅ ENHANCED CollectItem - zber artefakt/gear s XP systémom + zone activity tracking
 func (h *Handler) CollectItem(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -424,6 +549,9 @@ func (h *Handler) CollectItem(c *gin.Context) {
 		return
 	}
 
+	// ✅ NEW: Update zone activity on collection
+	h.updateZoneActivity(zone.ID)
+
 	// Check if player is in zone
 	var session common.PlayerSession
 	if err := h.db.Where("user_id = ? AND current_zone = ?", userID, zoneID).First(&session).Error; err != nil {
@@ -450,6 +578,7 @@ func (h *Handler) CollectItem(c *gin.Context) {
 	var collectedItem interface{}
 	var itemName string
 	var biome string
+	var xpResult *xp.XPResult
 
 	switch req.ItemType {
 	case "artifact":
@@ -482,6 +611,15 @@ func (h *Handler) CollectItem(c *gin.Context) {
 			},
 		}
 		h.db.Create(&inventory)
+
+		// ✅ NEW: Award XP for artifact (len pre artifacts!)
+		xpHandler := xp.NewHandler(h.db)
+		var err error
+		xpResult, err = xpHandler.AwardArtifactXP(user.ID, artifact.Rarity, artifact.Biome, zone.TierRequired)
+		if err != nil {
+			log.Printf("❌ Failed to award XP: %v", err)
+			// Continue anyway - don't fail the collection
+		}
 
 		collectedItem = artifact
 		itemName = artifact.Name
@@ -533,7 +671,12 @@ func (h *Handler) CollectItem(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	// ✅ NEW: Check if zone should be marked for empty cleanup
+	zoneUUID, _ := uuid.Parse(zoneID)
+	go h.checkAndCleanupEmptyZone(zoneUUID)
+
+	// ✅ ENHANCED: Response s XP systémom
+	response := gin.H{
 		"message":      "Item collected successfully",
 		"item":         collectedItem,
 		"item_name":    itemName,
@@ -543,7 +686,38 @@ func (h *Handler) CollectItem(c *gin.Context) {
 		"danger_level": zone.DangerLevel,
 		"collected_at": time.Now().Unix(),
 		"new_total":    user.TotalArtifacts + user.TotalGear + 1,
-	})
+	}
+
+	// ✅ Add XP data if successful (len pre artifacts)
+	if req.ItemType == "artifact" && xpResult != nil {
+		response["xp_gained"] = xpResult.XPGained
+		response["total_xp"] = xpResult.TotalXP
+		response["current_level"] = xpResult.CurrentLevel
+		response["xp_breakdown"] = xpResult.Breakdown
+
+		if xpResult.LevelUp {
+			response["level_up"] = true
+			response["level_up_info"] = xpResult.LevelUpInfo
+			response["congratulations"] = fmt.Sprintf("🎉 Level Up! You are now level %d!", xpResult.CurrentLevel)
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// ✅ NEW: Check and cleanup empty zone
+func (h *Handler) checkAndCleanupEmptyZone(zoneID uuid.UUID) {
+	// Wait a bit to allow for multiple rapid collections
+	time.Sleep(30 * time.Second)
+
+	var activeArtifacts int64
+	h.db.Model(&common.Artifact{}).Where("zone_id = ? AND is_active = true", zoneID).Count(&activeArtifacts)
+
+	if activeArtifacts == 0 {
+		// Zone is empty, mark for cleanup soon
+		h.db.Model(&common.Zone{}).Where("id = ?", zoneID).Update("last_activity", time.Now().Add(-10*time.Minute))
+		log.Printf("🏰 Zone %s marked for empty cleanup", zoneID)
+	}
 }
 
 // ============================================
@@ -627,30 +801,228 @@ func (h *Handler) SpawnGear(c *gin.Context) {
 	})
 }
 
-func (h *Handler) CleanupExpiredZones(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Cleanup expired zones not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetExpiredZones(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get expired zones not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetZoneAnalytics(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get zone analytics not implemented yet",
-		"status": "planned",
-	})
-}
-
 func (h *Handler) GetItemAnalytics(c *gin.Context) {
 	c.JSON(http.StatusNotImplemented, gin.H{
 		"error":  "Get item analytics not implemented yet",
 		"status": "planned",
+	})
+}
+
+// ============================================
+// HELPER FUNCTIONS FOR ZONE CREATION
+// ============================================
+
+// ✅ NEW: Missing helper functions
+func (h *Handler) selectBiome(tier int) string {
+	biomes := map[int][]string{
+		0: {"forest", "meadow", "grassland"},
+		1: {"forest", "meadow", "hills", "riverside"},
+		2: {"hills", "forest", "swamp", "rocky"},
+		3: {"swamp", "rocky", "desert", "wasteland"},
+		4: {"wasteland", "volcanic", "frozen", "abyss"},
+	}
+
+	if biomesForTier, exists := biomes[tier]; exists {
+		return biomesForTier[rand.Intn(len(biomesForTier))]
+	}
+	return "forest" // Default fallback
+}
+
+func (h *Handler) generateZoneName(tier int) string {
+	prefixes := map[int][]string{
+		0: {"Peaceful", "Quiet", "Serene", "Gentle"},
+		1: {"Silent", "Hidden", "Mystic", "Ancient"},
+		2: {"Dark", "Shadowy", "Twisted", "Forgotten"},
+		3: {"Cursed", "Rotten", "Haunted", "Corrupted"},
+		4: {"Infernal", "Void", "Nightmare", "Apocalyptic"},
+	}
+
+	suffixes := map[int][]string{
+		0: {"Grove", "Garden", "Clearing", "Haven"},
+		1: {"Thicket", "Glen", "Hollow", "Sanctuary"},
+		2: {"Woods", "Cavern", "Ruins", "Crypt"},
+		3: {"Swamp", "Pit", "Graveyard", "Wasteland"},
+		4: {"Abyss", "Inferno", "Vortex", "Realm"},
+	}
+
+	tierPrefixes := prefixes[0] // Default
+	tierSuffixes := suffixes[0] // Default
+
+	if p, exists := prefixes[tier]; exists {
+		tierPrefixes = p
+	}
+	if s, exists := suffixes[tier]; exists {
+		tierSuffixes = s
+	}
+
+	prefix := tierPrefixes[rand.Intn(len(tierPrefixes))]
+	suffix := tierSuffixes[rand.Intn(len(tierSuffixes))]
+
+	return fmt.Sprintf("%s %s (T%d)", prefix, suffix, tier)
+}
+
+func (h *Handler) spawnItemsInZone(zoneID uuid.UUID, tier int, biome string) {
+	// Spawn artifacts
+	artifactCount := rand.Intn(3) + 1 // 1-3 artifacts
+	for i := 0; i < artifactCount; i++ {
+		artifact := h.generateArtifact(zoneID, tier, biome)
+		h.db.Create(&artifact)
+	}
+
+	// Spawn gear
+	gearCount := rand.Intn(2) + 1 // 1-2 gear items
+	for i := 0; i < gearCount; i++ {
+		gear := h.generateGear(zoneID, tier, biome)
+		h.db.Create(&gear)
+	}
+}
+
+func (h *Handler) generateArtifact(zoneID uuid.UUID, tier int, biome string) common.Artifact {
+	artifactTypes := []string{"ancient_coin", "crystal", "rune", "scroll", "gem", "tablet", "orb"}
+	rarities := map[int][]string{
+		0: {"common", "common", "common", "rare"},
+		1: {"common", "common", "rare", "rare"},
+		2: {"common", "rare", "rare", "epic"},
+		3: {"rare", "rare", "epic", "epic"},
+		4: {"epic", "epic", "legendary", "legendary"},
+	}
+
+	tierRarities := rarities[0] // Default
+	if r, exists := rarities[tier]; exists {
+		tierRarities = r
+	}
+
+	artifactType := artifactTypes[rand.Intn(len(artifactTypes))]
+	rarity := tierRarities[rand.Intn(len(tierRarities))]
+
+	return common.Artifact{
+		BaseModel: common.BaseModel{ID: uuid.New()},
+		ZoneID:    zoneID,
+		Name:      h.generateArtifactName(artifactType, rarity, biome),
+		Type:      artifactType,
+		Rarity:    rarity,
+		Biome:     biome,
+		Location: common.Location{
+			Latitude:  0, // Will be set by zone location
+			Longitude: 0, // Will be set by zone location
+			Timestamp: time.Now(),
+		},
+		IsActive: true,
+		Properties: common.JSONB{
+			"biome":      biome,
+			"spawned_at": time.Now().Unix(),
+		},
+	}
+}
+
+func (h *Handler) generateGear(zoneID uuid.UUID, tier int, biome string) common.Gear {
+	gearTypes := []string{"sword", "shield", "armor", "boots", "helmet", "ring", "amulet"}
+
+	gearType := gearTypes[rand.Intn(len(gearTypes))]
+	level := tier + rand.Intn(3) + 1 // Tier + 1-3
+
+	return common.Gear{
+		BaseModel: common.BaseModel{ID: uuid.New()},
+		ZoneID:    zoneID,
+		Name:      h.generateGearName(gearType, level, biome),
+		Type:      gearType,
+		Level:     level,
+		Biome:     biome,
+		Location: common.Location{
+			Latitude:  0, // Will be set by zone location
+			Longitude: 0, // Will be set by zone location
+			Timestamp: time.Now(),
+		},
+		IsActive: true,
+		Properties: common.JSONB{
+			"biome":      biome,
+			"spawned_at": time.Now().Unix(),
+		},
+	}
+}
+
+func (h *Handler) generateArtifactName(artifactType, rarity, biome string) string {
+	biomeAdjectives := map[string]string{
+		"forest":    "Verdant",
+		"swamp":     "Murky",
+		"desert":    "Scorched",
+		"mountain":  "Crystalline",
+		"wasteland": "Corrupted",
+		"volcanic":  "Molten",
+	}
+
+	rarityAdjectives := map[string]string{
+		"common":    "Simple",
+		"rare":      "Ancient",
+		"epic":      "Legendary",
+		"legendary": "Divine",
+	}
+
+	biomeAdj := biomeAdjectives[biome]
+	if biomeAdj == "" {
+		biomeAdj = "Mystic"
+	}
+
+	rarityAdj := rarityAdjectives[rarity]
+	if rarityAdj == "" {
+		rarityAdj = "Ancient"
+	}
+
+	return fmt.Sprintf("%s %s %s", biomeAdj, rarityAdj, artifactType)
+}
+
+func (h *Handler) generateGearName(gearType string, level int, biome string) string {
+	biomeAdjectives := map[string]string{
+		"forest":    "Wooden",
+		"swamp":     "Rusty",
+		"desert":    "Bronze",
+		"mountain":  "Steel",
+		"wasteland": "Iron",
+		"volcanic":  "Obsidian",
+	}
+
+	biomeAdj := biomeAdjectives[biome]
+	if biomeAdj == "" {
+		biomeAdj = "Iron"
+	}
+
+	return fmt.Sprintf("%s %s +%d", biomeAdj, gearType, level)
+}
+
+// ============================================
+// ZONE CLEANUP ENDPOINTS (REAL IMPLEMENTATIONS)
+// ============================================
+
+func (h *Handler) CleanupExpiredZones(c *gin.Context) {
+	cleanupService := NewCleanupService(h.db)
+	result := cleanupService.CleanupExpiredZones()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Zone cleanup completed",
+		"result":  result,
+		"status":  "success",
+	})
+}
+
+func (h *Handler) GetExpiredZones(c *gin.Context) {
+	var expiredZones []common.Zone
+	h.db.Where("is_active = true AND expires_at < ?", time.Now()).Find(&expiredZones)
+
+	c.JSON(http.StatusOK, gin.H{
+		"expired_zones": expiredZones,
+		"count":         len(expiredZones),
+		"current_time":  time.Now().Format(time.RFC3339),
+		"status":        "success",
+	})
+}
+
+func (h *Handler) GetZoneAnalytics(c *gin.Context) {
+	cleanupService := NewCleanupService(h.db)
+	stats := cleanupService.GetCleanupStats()
+
+	c.JSON(http.StatusOK, gin.H{
+		"zone_analytics": stats,
+		"timestamp":      time.Now().Format(time.RFC3339),
+		"status":         "success",
 	})
 }

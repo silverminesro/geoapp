@@ -35,18 +35,17 @@ type BaseModel struct {
 	ID        uuid.UUID  `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	CreatedAt time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty" gorm:"index"` // ✅ PRIDANÉ: Soft delete support
+	DeletedAt *time.Time `json:"deleted_at,omitempty" gorm:"index"`
 }
 
-// ✅ OPRAVENÉ: Location bez Accuracy (databáza ho nemá)
+// Location bez Accuracy (databáza ho nemá)
 type Location struct {
-	Latitude  float64 `json:"latitude" gorm:"type:decimal(10,8)"`
-	Longitude float64 `json:"longitude" gorm:"type:decimal(11,8)"`
-	// ❌ REMOVED: Accuracy  float64   `json:"accuracy,omitempty"` // Database doesn't have this column
+	Latitude  float64   `json:"latitude" gorm:"type:decimal(10,8)"`
+	Longitude float64   `json:"longitude" gorm:"type:decimal(11,8)"`
 	Timestamp time.Time `json:"timestamp" gorm:"autoUpdateTime"`
 }
 
-// ✅ PRIDANÉ: LocationWithAccuracy pre user tracking kde potrebujeme accuracy
+// LocationWithAccuracy pre user tracking kde potrebujeme accuracy
 type LocationWithAccuracy struct {
 	Latitude  float64   `json:"latitude" gorm:"type:decimal(10,8)"`
 	Longitude float64   `json:"longitude" gorm:"type:decimal(11,8)"`
@@ -54,30 +53,30 @@ type LocationWithAccuracy struct {
 	Timestamp time.Time `json:"timestamp" gorm:"autoUpdateTime"`
 }
 
-// ✅ OPRAVENÝ User model - match exact database structure
+// User model - match exact database structure
 type User struct {
 	BaseModel
 	Username        string     `json:"username" gorm:"uniqueIndex;not null;size:50"`
 	Email           string     `json:"email" gorm:"uniqueIndex;not null;size:100"`
 	PasswordHash    string     `json:"-" gorm:"not null;size:255"`
-	Tier            int        `json:"tier" gorm:"default:0"`                // ✅ OPRAVENÉ: default 0 (not 1)
-	TierExpires     *time.Time `json:"tier_expires,omitempty"`               // ✅ PRIDANÉ
-	TierAutoRenew   bool       `json:"tier_auto_renew" gorm:"default:false"` // ✅ PRIDANÉ
-	XP              int        `json:"xp" gorm:"default:0"`                  // ✅ PRIDANÉ
-	Level           int        `json:"level" gorm:"default:1"`               // ✅ PRIDANÉ
-	TotalArtifacts  int        `json:"total_artifacts" gorm:"default:0"`     // ✅ PRIDANÉ
-	TotalGear       int        `json:"total_gear" gorm:"default:0"`          // ✅ PRIDANÉ
-	ZonesDiscovered int        `json:"zones_discovered" gorm:"default:0"`    // ✅ PRIDANÉ
+	Tier            int        `json:"tier" gorm:"default:0"`
+	TierExpires     *time.Time `json:"tier_expires,omitempty"`
+	TierAutoRenew   bool       `json:"tier_auto_renew" gorm:"default:false"`
+	XP              int        `json:"xp" gorm:"default:0"`
+	Level           int        `json:"level" gorm:"default:1"`
+	TotalArtifacts  int        `json:"total_artifacts" gorm:"default:0"`
+	TotalGear       int        `json:"total_gear" gorm:"default:0"`
+	ZonesDiscovered int        `json:"zones_discovered" gorm:"default:0"`
 	IsActive        bool       `json:"is_active" gorm:"default:true"`
-	IsBanned        bool       `json:"is_banned" gorm:"default:false"`                               // ✅ PRIDANÉ
-	LastLogin       *time.Time `json:"last_login,omitempty"`                                         // ✅ PRIDANÉ
-	ProfileData     JSONB      `json:"profile_data,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"` // ✅ PRIDANÉ
+	IsBanned        bool       `json:"is_banned" gorm:"default:false"`
+	LastLogin       *time.Time `json:"last_login,omitempty"`
+	ProfileData     JSONB      `json:"profile_data,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
 
 	// Relationships
 	Inventory []InventoryItem `json:"inventory,omitempty" gorm:"foreignKey:UserID"`
 }
 
-// Zone model - match exact database structure
+// ✅ UPDATED: Zone model with TTL system + biome support
 type Zone struct {
 	BaseModel
 	Name         string   `json:"name" gorm:"not null;size:100"`
@@ -87,11 +86,68 @@ type Zone struct {
 	RadiusMeters int      `json:"radius_meters" gorm:"not null"`
 	IsActive     bool     `json:"is_active" gorm:"default:true"`
 	ZoneType     string   `json:"zone_type" gorm:"not null;default:'static'"`
-	Properties   JSONB    `json:"properties,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
+
+	// ✅ Biome system fields
+	Biome       string `json:"biome" gorm:"size:50;default:'forest'"`
+	DangerLevel string `json:"danger_level" gorm:"size:20;default:'low'"`
+
+	// ✅ NEW: TTL & Cleanup fields
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	LastActivity time.Time  `json:"last_activity" gorm:"default:CURRENT_TIMESTAMP"`
+	AutoCleanup  bool       `json:"auto_cleanup" gorm:"default:true"`
+
+	Properties JSONB `json:"properties,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
 
 	// Relationships
 	Artifacts []Artifact `json:"artifacts,omitempty" gorm:"foreignKey:ZoneID"`
 	Gear      []Gear     `json:"gear,omitempty" gorm:"foreignKey:ZoneID"`
+}
+
+// ✅ NEW: Helper methods for Zone TTL
+func (z *Zone) IsExpired() bool {
+	if z.ExpiresAt == nil {
+		return false
+	}
+	return time.Now().After(*z.ExpiresAt)
+}
+
+func (z *Zone) TimeUntilExpiry() time.Duration {
+	if z.ExpiresAt == nil {
+		return 0
+	}
+	return time.Until(*z.ExpiresAt)
+}
+
+func (z *Zone) TTLStatus() string {
+	if z.ExpiresAt == nil {
+		return "permanent"
+	}
+
+	timeLeft := z.TimeUntilExpiry()
+	if timeLeft <= 0 {
+		return "expired"
+	} else if timeLeft <= 1*time.Hour {
+		return "expiring"
+	} else if timeLeft <= 6*time.Hour {
+		return "aging"
+	} else {
+		return "fresh"
+	}
+}
+
+func (z *Zone) UpdateActivity() {
+	z.LastActivity = time.Now()
+}
+
+func (z *Zone) SetRandomTTL() {
+	// Random TTL between 6-24 hours
+	minTTL := 6 * time.Hour
+	maxTTL := 24 * time.Hour
+	ttlRange := maxTTL - minTTL
+	randomTTL := minTTL + time.Duration(float64(ttlRange)*(0.5+0.5)) // Simple randomization
+
+	expiresAt := time.Now().Add(randomTTL)
+	z.ExpiresAt = &expiresAt
 }
 
 // Inventory model
@@ -108,48 +164,56 @@ type InventoryItem struct {
 	User *User `json:"user,omitempty" gorm:"foreignKey:UserID"`
 }
 
-// ✅ OPRAVENÝ Artifact model - match exact database structure
+// ✅ UPDATED: Artifact model with biome support
 type Artifact struct {
 	BaseModel
-	ZoneID     uuid.UUID `json:"zone_id" gorm:"not null;index"`
-	Name       string    `json:"name" gorm:"not null;size:100"`
-	Type       string    `json:"type" gorm:"not null;size:50"`
-	Rarity     string    `json:"rarity" gorm:"not null;size:20"` // common, rare, epic, legendary
-	Location   Location  `json:"location" gorm:"embedded;embeddedPrefix:location_"`
-	Properties JSONB     `json:"properties,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
-	IsActive   bool      `json:"is_active" gorm:"default:true"`
-	// ❌ VYMAZANÉ: SpawnedAt - stĺpec neexistuje v databáze!
+	ZoneID   uuid.UUID `json:"zone_id" gorm:"not null;index"`
+	Name     string    `json:"name" gorm:"not null;size:100"`
+	Type     string    `json:"type" gorm:"not null;size:50"`
+	Rarity   string    `json:"rarity" gorm:"not null;size:20"` // common, rare, epic, legendary
+	Location Location  `json:"location" gorm:"embedded;embeddedPrefix:location_"`
+
+	// ✅ Biome system fields
+	Biome            string `json:"biome" gorm:"size:50;default:'forest'"`
+	ExclusiveToBiome bool   `json:"exclusive_to_biome" gorm:"default:false"`
+
+	Properties JSONB `json:"properties,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
+	IsActive   bool  `json:"is_active" gorm:"default:true"`
 
 	// Relationships
 	Zone *Zone `json:"zone,omitempty" gorm:"foreignKey:ZoneID"`
 }
 
-// ✅ OPRAVENÝ Gear model - match exact database structure
+// ✅ UPDATED: Gear model with biome support
 type Gear struct {
 	BaseModel
-	ZoneID     uuid.UUID `json:"zone_id" gorm:"not null;index"`
-	Name       string    `json:"name" gorm:"not null;size:100"`
-	Type       string    `json:"type" gorm:"not null;size:50"` // weapon, armor, tool
-	Level      int       `json:"level" gorm:"default:1"`
-	Location   Location  `json:"location" gorm:"embedded;embeddedPrefix:location_"`
-	Properties JSONB     `json:"properties,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
-	IsActive   bool      `json:"is_active" gorm:"default:true"`
-	// ❌ VYMAZANÉ: SpawnedAt - stĺpec neexistuje v databáze!
+	ZoneID   uuid.UUID `json:"zone_id" gorm:"not null;index"`
+	Name     string    `json:"name" gorm:"not null;size:100"`
+	Type     string    `json:"type" gorm:"not null;size:50"` // weapon, armor, tool
+	Level    int       `json:"level" gorm:"default:1"`
+	Location Location  `json:"location" gorm:"embedded;embeddedPrefix:location_"`
+
+	// ✅ Biome system fields
+	Biome            string `json:"biome" gorm:"size:50;default:'forest'"`
+	ExclusiveToBiome bool   `json:"exclusive_to_biome" gorm:"default:false"`
+
+	Properties JSONB `json:"properties,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
+	IsActive   bool  `json:"is_active" gorm:"default:true"`
 
 	// Relationships
 	Zone *Zone `json:"zone,omitempty" gorm:"foreignKey:ZoneID"`
 }
 
-// ✅ PRIDANÉ: TableName methods pre správne názvy
+// Table name methods
 func (Artifact) TableName() string {
-	return "artifacts" // ✅ Correct plural form
+	return "artifacts"
 }
 
 func (Gear) TableName() string {
-	return "gear" // ✅ Correct singular form (matches database)
+	return "gear"
 }
 
-// ✅ OPRAVENÉ: PlayerSession - NO BaseModel embedding to avoid conflicts
+// PlayerSession - NO BaseModel embedding to avoid conflicts
 type PlayerSession struct {
 	ID        uuid.UUID `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
@@ -160,7 +224,7 @@ type PlayerSession struct {
 	IsOnline    bool       `json:"is_online" gorm:"default:true"`
 	CurrentZone *uuid.UUID `json:"current_zone,omitempty" gorm:"index"`
 
-	// ✅ Individual location fields instead of embedded struct
+	// Individual location fields instead of embedded struct
 	LastLocationLatitude  float64   `json:"last_location_latitude" gorm:"type:decimal(10,8)"`
 	LastLocationLongitude float64   `json:"last_location_longitude" gorm:"type:decimal(11,8)"`
 	LastLocationAccuracy  float64   `json:"last_location_accuracy"`
@@ -171,7 +235,7 @@ type PlayerSession struct {
 	Zone *Zone `json:"zone,omitempty" gorm:"foreignKey:CurrentZone"`
 }
 
-// ✅ PRIDANÉ: Helper method pre PlayerSession to get LastLocation as struct
+// Helper methods for PlayerSession
 func (ps *PlayerSession) GetLastLocation() LocationWithAccuracy {
 	return LocationWithAccuracy{
 		Latitude:  ps.LastLocationLatitude,
@@ -181,7 +245,6 @@ func (ps *PlayerSession) GetLastLocation() LocationWithAccuracy {
 	}
 }
 
-// ✅ PRIDANÉ: Helper method pre PlayerSession to set LastLocation from struct
 func (ps *PlayerSession) SetLastLocation(loc LocationWithAccuracy) {
 	ps.LastLocationLatitude = loc.Latitude
 	ps.LastLocationLongitude = loc.Longitude
