@@ -1,15 +1,15 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-// AdminOnly middleware - requires tier >= 4 for admin access
+// AdminOrHigher middleware - requires tier >= 4 (Admin or Super Admin)
 func AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get tier from JWT context (set by JWTAuth middleware)
 		tier, exists := c.Get("tier")
 		if !exists {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -20,25 +20,34 @@ func AdminOnly() gin.HandlerFunc {
 			return
 		}
 
-		// Check if user has admin tier (4 or higher)
+		username, _ := c.Get("username")
 		userTier, ok := tier.(int)
 		if !ok || userTier < 4 {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":         "Admin access required",
-				"message":       "You need admin privileges to access this resource",
+				"message":       "You need Admin (Tier 4+) privileges",
 				"required_tier": 4,
 				"your_tier":     userTier,
+				"current_user":  username,
 			})
 			c.Abort()
 			return
 		}
 
-		// User is admin, continue to next handler
+		// Log admin access
+		adminLevel := "Admin"
+		if userTier == 5 {
+			adminLevel = "Super Admin"
+		}
+		log.Printf("🔧 %s ACCESS: %s (Tier %d) → %s %s",
+			adminLevel, username, userTier, c.Request.Method, c.Request.URL.Path)
+
+		c.Set("admin_level", adminLevel)
 		c.Next()
 	}
 }
 
-// SuperAdminOnly middleware - requires tier >= 5 for super admin access
+// SuperAdminOnly middleware - requires tier = 5 (silverminesro + K4RDAN only)
 func SuperAdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tier, exists := c.Get("tier")
@@ -50,23 +59,30 @@ func SuperAdminOnly() gin.HandlerFunc {
 			return
 		}
 
+		username, _ := c.Get("username")
 		userTier, ok := tier.(int)
 		if !ok || userTier < 5 {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error":         "Super admin access required",
+				"error":         "Super Admin access required",
+				"message":       "Only silverminesro and K4RDAN have Super Admin access",
 				"required_tier": 5,
 				"your_tier":     userTier,
+				"current_user":  username,
 			})
 			c.Abort()
 			return
 		}
 
+		// Log Super Admin access
+		log.Printf("👑 SUPER ADMIN ACCESS: %s (Tier %d) → %s %s",
+			username, userTier, c.Request.Method, c.Request.URL.Path)
+
 		c.Next()
 	}
 }
 
-// ModeratorOnly middleware - requires tier >= 3 for moderator access
-func ModeratorOnly() gin.HandlerFunc {
+// LegendaryOrHigher middleware - requires tier >= 3
+func LegendaryOrHigher() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tier, exists := c.Get("tier")
 		if !exists {
@@ -80,9 +96,11 @@ func ModeratorOnly() gin.HandlerFunc {
 		userTier, ok := tier.(int)
 		if !ok || userTier < 3 {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error":         "Moderator access required",
+				"error":         "Legendary User access required",
+				"message":       "Upgrade to Legendary (Tier 3+) for exclusive features",
 				"required_tier": 3,
 				"your_tier":     userTier,
+				"upgrade_url":   "/upgrade/legendary",
 			})
 			c.Abort()
 			return
@@ -90,4 +108,38 @@ func ModeratorOnly() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// PremiumOrHigher middleware - requires tier >= 2
+func PremiumOrHigher() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tier, exists := c.Get("tier")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Authentication required",
+			})
+			c.Abort()
+			return
+		}
+
+		userTier, ok := tier.(int)
+		if !ok || userTier < 2 {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":         "Premium access required",
+				"message":       "Upgrade to Premium (Tier 2+) for enhanced features",
+				"required_tier": 2,
+				"your_tier":     userTier,
+				"upgrade_url":   "/upgrade/premium",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// Legacy alias for compatibility
+func ModeratorOnly() gin.HandlerFunc {
+	return LegendaryOrHigher()
 }

@@ -400,10 +400,34 @@ func (h *Handler) GetUserStats(c *gin.Context) {
 	})
 }
 
+// Add this method to user/handler.go
+
 func (h *Handler) GetAllUsers(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get all users not implemented yet",
-		"status": "planned",
+	// Super Admin only - get all users
+	var users []common.User
+	if err := h.db.Select("id, username, email, tier, is_active, is_banned, created_at, updated_at, xp, level, total_artifacts, total_gear").Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch users",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Count by tiers
+	tierCounts := make(map[int]int)
+	for _, user := range users {
+		tierCounts[user.Tier]++
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"users":        users,
+		"total_users":  len(users),
+		"tier_counts":  tierCounts,
+		"message":      "All users retrieved successfully",
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"requested_by": c.GetString("username"),
+		"admin_level":  c.GetString("admin_level"),
 	})
 }
 

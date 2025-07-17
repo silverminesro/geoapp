@@ -6,6 +6,7 @@ import (
 	"geoanomaly/internal/auth"
 	"geoanomaly/internal/common"
 	"geoanomaly/internal/game"
+	"geoanomaly/internal/inventory"
 	"geoanomaly/internal/location"
 	"geoanomaly/internal/user"
 	"geoanomaly/pkg/middleware"
@@ -14,7 +15,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// ✅ FIXED: Removed zones import - all functionality is now in game package
 func setupRoutes(db *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -25,11 +25,12 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
 
-	// ✅ SIMPLIFIED: Only main handlers (zones functionality merged into game)
+	// ✅ UPDATED: Added inventory handler
 	authHandler := auth.NewHandler(db, nil)
 	userHandler := user.NewHandler(db, nil)
-	gameHandler := game.NewHandler(db, nil) // ✅ Contains all game + zones functionality
+	gameHandler := game.NewHandler(db, nil)
 	locationHandler := location.NewHandler(db, nil)
+	inventoryHandler := inventory.NewHandler(db)
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
@@ -39,7 +40,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			"version":    "1.0.0",
 			"service":    "geoanomaly-backend",
 			"created_by": "silverminesro",
-			"structure":  "unified", // ✅ UPDATED
+			"structure":  "unified",
 		})
 	})
 
@@ -52,7 +53,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			"uptime":      time.Since(startTime).String(),
 			"developer":   "silverminesro",
 			"database":    getEnvVar("DB_NAME", "geoanomaly") + "@" + getEnvVar("DB_HOST", "localhost"),
-			"structure":   "unified", // ✅ UPDATED
+			"structure":   "unified",
 		})
 	})
 
@@ -67,7 +68,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 				"endpoint":  "/api/v1/test",
 				"developer": "silverminesro",
 				"status":    "operational",
-				"version":   "unified-structure", // ✅ UPDATED
+				"version":   "unified-structure",
 			})
 		})
 
@@ -77,20 +78,23 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			var levelCount int64
 			var userCount int64
 			var zoneCount int64
+			var inventoryCount int64
 
 			db.Raw("SELECT COUNT(*) FROM tier_definitions").Scan(&tierCount)
 			db.Raw("SELECT COUNT(*) FROM level_definitions").Scan(&levelCount)
 			db.Model(&common.User{}).Count(&userCount)
 			db.Model(&common.Zone{}).Count(&zoneCount)
+			db.Model(&common.InventoryItem{}).Count(&inventoryCount)
 
 			c.JSON(200, gin.H{
 				"database": "connected",
 				"status":   "operational",
 				"stats": gin.H{
-					"tiers":  tierCount,
-					"levels": levelCount,
-					"users":  userCount,
-					"zones":  zoneCount,
+					"tiers":           tierCount,
+					"levels":          levelCount,
+					"users":           userCount,
+					"zones":           zoneCount,
+					"inventory_items": inventoryCount,
 				},
 				"message":   "Database connection successful! 🎯",
 				"timestamp": time.Now().Format(time.RFC3339),
@@ -141,6 +145,28 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			})
 		})
 
+		// ✅ NEW: Inventory test endpoint
+		v1.GET("/inventory-test", func(c *gin.Context) {
+			var inventoryItems []common.InventoryItem
+			result := db.Limit(10).Find(&inventoryItems)
+
+			if result.Error != nil {
+				c.JSON(500, gin.H{
+					"error":   "Failed to query inventory",
+					"message": result.Error.Error(),
+				})
+				return
+			}
+
+			c.JSON(200, gin.H{
+				"inventory_items": inventoryItems,
+				"count":           len(inventoryItems),
+				"total":           result.RowsAffected,
+				"message":         "Inventory retrieved successfully",
+				"timestamp":       time.Now().Format(time.RFC3339),
+			})
+		})
+
 		// Server status endpoint
 		v1.GET("/status", func(c *gin.Context) {
 			sqlDB, err := db.DB()
@@ -161,7 +187,7 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 					"uptime":      time.Since(startTime).String(),
 					"environment": getEnvVar("APP_ENV", "development"),
 					"version":     "1.0.0",
-					"structure":   "unified", // ✅ UPDATED
+					"structure":   "unified",
 				},
 				"database": gin.H{
 					"status": dbStatus,
@@ -206,35 +232,53 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	}
 
 	// ==========================================
+	// 🎒 INVENTORY ROUTES (Protected - JWT required)
+	// ✅ FIXED: Using specific paths to avoid conflicts
+	// ==========================================
+	inventoryRoutes := v1.Group("/inventory")
+	inventoryRoutes.Use(middleware.JWTAuth())
+	{
+		inventoryRoutes.GET("/items", inventoryHandler.GetInventory) // ✅ CHANGED FROM "/"
+		inventoryRoutes.GET("/summary", inventoryHandler.GetInventorySummary)
+		inventoryRoutes.DELETE("/:id", inventoryHandler.DeleteItem)
+
+		// Future inventory routes (placeholders)
+		inventoryRoutes.POST("/:id/use", func(c *gin.Context) {
+			c.JSON(501, gin.H{
+				"error":   "Not implemented",
+				"message": "Item usage not implemented yet",
+				"status":  "planned",
+			})
+		})
+
+		inventoryRoutes.PUT("/:id/favorite", func(c *gin.Context) {
+			c.JSON(501, gin.H{
+				"error":   "Not implemented",
+				"message": "Item favoriting not implemented yet",
+				"status":  "planned",
+			})
+		})
+	}
+
+	// ==========================================
 	// 🎮 GAME ROUTES (Protected - JWT required)
-	// ✅ ALL HANDLED BY SINGLE gameHandler
 	// ==========================================
 	gameRoutes := v1.Group("/game")
 	gameRoutes.Use(middleware.JWTAuth())
 	{
-		// ✨ MAIN GAME ENDPOINTS
-		gameRoutes.POST("/scan-area", gameHandler.ScanArea) // 🔥 PRIMARY ENDPOINT
+		gameRoutes.POST("/scan-area", gameHandler.ScanArea)
 
-		// ✅ UNIFIED: Zone management - all handled by gameHandler
 		zoneRoutes := gameRoutes.Group("/zones")
 		{
-			// Zone discovery
 			zoneRoutes.GET("/nearby", gameHandler.GetNearbyZones)
-
-			// Zone interaction (previously in zones package, now in game)
 			zoneRoutes.GET("/:id", gameHandler.GetZoneDetails)
 			zoneRoutes.POST("/:id/enter", gameHandler.EnterZone)
 			zoneRoutes.POST("/:id/exit", gameHandler.ExitZone)
 			zoneRoutes.GET("/:id/scan", gameHandler.ScanZone)
-
-			// Item collection
 			zoneRoutes.POST("/:id/collect", gameHandler.CollectItem)
-
-			// Zone stats
 			zoneRoutes.GET("/:id/stats", gameHandler.GetZoneStats)
 		}
 
-		// Item management
 		itemRoutes := gameRoutes.Group("/items")
 		{
 			itemRoutes.GET("/artifacts", gameHandler.GetAvailableArtifacts)
@@ -242,7 +286,6 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 			itemRoutes.POST("/use/:id", gameHandler.UseItem)
 		}
 
-		// Game statistics
 		gameRoutes.GET("/leaderboard", gameHandler.GetLeaderboard)
 		gameRoutes.GET("/stats", gameHandler.GetGameStats)
 	}
@@ -270,26 +313,17 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 	adminRoutes.Use(middleware.JWTAuth())
 	adminRoutes.Use(middleware.AdminOnly())
 	{
-		// Zone management
 		adminRoutes.POST("/zones", gameHandler.CreateEventZone)
 		adminRoutes.PUT("/zones/:id", gameHandler.UpdateZone)
 		adminRoutes.DELETE("/zones/:id", gameHandler.DeleteZone)
-
-		// Item spawning
 		adminRoutes.POST("/zones/:id/spawn/artifact", gameHandler.SpawnArtifact)
 		adminRoutes.POST("/zones/:id/spawn/gear", gameHandler.SpawnGear)
-
-		// Zone maintenance
 		adminRoutes.POST("/zones/cleanup", gameHandler.CleanupExpiredZones)
 		adminRoutes.GET("/zones/expired", gameHandler.GetExpiredZones)
-
-		// User management
 		adminRoutes.GET("/users", userHandler.GetAllUsers)
 		adminRoutes.PUT("/users/:id/tier", userHandler.UpdateUserTier)
 		adminRoutes.POST("/users/:id/ban", userHandler.BanUser)
 		adminRoutes.POST("/users/:id/unban", userHandler.UnbanUser)
-
-		// Analytics
 		adminRoutes.GET("/analytics/zones", gameHandler.GetZoneAnalytics)
 		adminRoutes.GET("/analytics/players", userHandler.GetPlayerAnalytics)
 		adminRoutes.GET("/analytics/items", gameHandler.GetItemAnalytics)
@@ -312,72 +346,35 @@ func setupRoutes(db *gorm.DB) *gin.Engine {
 		})
 
 		systemRoutes.GET("/stats", func(c *gin.Context) {
+			var userCount, zoneCount, inventoryCount int64
+			db.Model(&common.User{}).Count(&userCount)
+			db.Model(&common.Zone{}).Count(&zoneCount)
+			db.Model(&common.InventoryItem{}).Count(&inventoryCount)
+
 			c.JSON(200, gin.H{
-				"active_players":  0,
-				"total_zones":     0,
+				"active_players":  userCount,
+				"total_zones":     zoneCount,
 				"dynamic_zones":   0,
 				"static_zones":    0,
 				"total_artifacts": 0,
 				"total_gear":      0,
-				"server_uptime":   "0s",
+				"inventory_items": inventoryCount,
+				"server_uptime":   time.Since(startTime).String(),
 				"last_cleanup":    "never",
 			})
 		})
 
-		// ✅ UPDATED: API documentation with unified structure
 		systemRoutes.GET("/endpoints", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"message":   "GeoAnomaly API Endpoints",
 				"version":   "1.0.0",
 				"structure": "unified",
-				"packages": gin.H{
-					"game":     "🎮 All game logic (zones, items, artifacts, gear, biomes)",
-					"auth":     "🔐 Authentication & authorization",
-					"user":     "👤 User profiles & inventory management",
-					"location": "📍 Real-time location tracking & multiplayer",
-				},
-				"file_structure": gin.H{
-					"internal/game/": gin.H{
-						"handler.go":   "Main game endpoints (scan, enter, collect)",
-						"zones.go":     "Zone creation & management",
-						"artifacts.go": "Artifact definitions & filtering",
-						"gear.go":      "Gear definitions & filtering",
-						"biomes.go":    "Biome templates & zone names",
-						"constants.go": "All game constants",
-						"types.go":     "Type definitions",
-						"utils.go":     "Utility functions",
-						"filtering.go": "Tier filtering logic",
-					},
-				},
 				"endpoints": gin.H{
-					"auth": gin.H{
-						"POST /auth/register": "Register new user",
-						"POST /auth/login":    "Login user",
-						"POST /auth/refresh":  "Refresh JWT token",
-						"POST /auth/logout":   "Logout user",
-					},
-					"game": gin.H{
-						"POST /game/scan-area":          "🔥 Scan area for dynamic zones",
-						"GET /game/zones/nearby":        "Get nearby zones",
-						"GET /game/zones/{id}":          "Get zone details",
-						"POST /game/zones/{id}/enter":   "Enter zone",
-						"POST /game/zones/{id}/exit":    "Exit zone",
-						"GET /game/zones/{id}/scan":     "Scan zone for items",
-						"POST /game/zones/{id}/collect": "Collect item from zone",
-						"GET /game/leaderboard":         "Get leaderboard",
-						"GET /game/items/artifacts":     "Get available artifacts",
-						"GET /game/items/gear":          "Get available gear",
-					},
-					"location": gin.H{
-						"POST /location/update":             "Update player location",
-						"GET /location/nearby":              "Get nearby players",
-						"GET /location/zones/{id}/activity": "Get zone activity",
-					},
-					"user": gin.H{
-						"GET /user/profile":   "Get user profile",
-						"PUT /user/profile":   "Update user profile",
-						"GET /user/inventory": "Get user inventory",
-						"POST /user/location": "Update user location",
+					"inventory": gin.H{
+						"GET /inventory/items":     "🎒 Get user inventory (FIXED)",
+						"GET /inventory/summary":   "📊 Get inventory summary",
+						"DELETE /inventory/{id}":   "🗑️ Delete inventory item",
+						"POST /inventory/{id}/use": "⚡ Use inventory item (planned)",
 					},
 				},
 			})

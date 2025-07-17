@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -143,8 +144,8 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 		}
 
 		if err := h.db.Create(&zone).Error; err == nil {
-			// Spawn items in new zone
-			h.spawnItemsInZone(zone.ID, tier, zone.Biome)
+			// ✅ FIXED: Spawn items in new zone with zone location
+			h.spawnItemsInZone(zone.ID, tier, zone.Biome, zone.Location, zone.RadiusMeters)
 			newZones = append(newZones, zone)
 
 			log.Printf("🏰 Zone spawned: %s (TTL: %.1fh, expires: %s)",
@@ -861,23 +862,33 @@ func (h *Handler) generateZoneName(tier int) string {
 	return fmt.Sprintf("%s %s (T%d)", prefix, suffix, tier)
 }
 
-func (h *Handler) spawnItemsInZone(zoneID uuid.UUID, tier int, biome string) {
-	// Spawn artifacts
+// ✅ FIXED: spawnItemsInZone now gets zone location and radius
+func (h *Handler) spawnItemsInZone(zoneID uuid.UUID, tier int, biome string, zoneCenter common.Location, zoneRadius int) {
+	// ✅ FIXED: Spawn artifacts with zone location data
 	artifactCount := rand.Intn(3) + 1 // 1-3 artifacts
 	for i := 0; i < artifactCount; i++ {
-		artifact := h.generateArtifact(zoneID, tier, biome)
-		h.db.Create(&artifact)
+		artifact := h.generateArtifact(zoneID, tier, biome, zoneCenter, zoneRadius)
+		if err := h.db.Create(&artifact).Error; err != nil {
+			log.Printf("❌ Failed to create artifact: %v", err)
+		} else {
+			log.Printf("💎 Artifact spawned: %s at [%.6f, %.6f]", artifact.Name, artifact.Location.Latitude, artifact.Location.Longitude)
+		}
 	}
 
-	// Spawn gear
+	// ✅ FIXED: Spawn gear with zone location data
 	gearCount := rand.Intn(2) + 1 // 1-2 gear items
 	for i := 0; i < gearCount; i++ {
-		gear := h.generateGear(zoneID, tier, biome)
-		h.db.Create(&gear)
+		gear := h.generateGear(zoneID, tier, biome, zoneCenter, zoneRadius)
+		if err := h.db.Create(&gear).Error; err != nil {
+			log.Printf("❌ Failed to create gear: %v", err)
+		} else {
+			log.Printf("⚔️ Gear spawned: %s at [%.6f, %.6f]", gear.Name, gear.Location.Latitude, gear.Location.Longitude)
+		}
 	}
 }
 
-func (h *Handler) generateArtifact(zoneID uuid.UUID, tier int, biome string) common.Artifact {
+// ✅ FIXED: generateArtifact with random position in zone
+func (h *Handler) generateArtifact(zoneID uuid.UUID, tier int, biome string, zoneCenter common.Location, zoneRadius int) common.Artifact {
 	artifactTypes := []string{"ancient_coin", "crystal", "rune", "scroll", "gem", "tablet", "orb"}
 	rarities := map[int][]string{
 		0: {"common", "common", "common", "rare"},
@@ -902,12 +913,8 @@ func (h *Handler) generateArtifact(zoneID uuid.UUID, tier int, biome string) com
 		Type:      artifactType,
 		Rarity:    rarity,
 		Biome:     biome,
-		Location: common.Location{
-			Latitude:  0, // Will be set by zone location
-			Longitude: 0, // Will be set by zone location
-			Timestamp: time.Now(),
-		},
-		IsActive: true,
+		Location:  h.generateRandomLocationInZone(zoneCenter, zoneRadius), // ✅ FIXED: Random position in zone
+		IsActive:  true,
 		Properties: common.JSONB{
 			"biome":      biome,
 			"spawned_at": time.Now().Unix(),
@@ -915,7 +922,8 @@ func (h *Handler) generateArtifact(zoneID uuid.UUID, tier int, biome string) com
 	}
 }
 
-func (h *Handler) generateGear(zoneID uuid.UUID, tier int, biome string) common.Gear {
+// ✅ FIXED: generateGear with random position in zone
+func (h *Handler) generateGear(zoneID uuid.UUID, tier int, biome string, zoneCenter common.Location, zoneRadius int) common.Gear {
 	gearTypes := []string{"sword", "shield", "armor", "boots", "helmet", "ring", "amulet"}
 
 	gearType := gearTypes[rand.Intn(len(gearTypes))]
@@ -928,12 +936,8 @@ func (h *Handler) generateGear(zoneID uuid.UUID, tier int, biome string) common.
 		Type:      gearType,
 		Level:     level,
 		Biome:     biome,
-		Location: common.Location{
-			Latitude:  0, // Will be set by zone location
-			Longitude: 0, // Will be set by zone location
-			Timestamp: time.Now(),
-		},
-		IsActive: true,
+		Location:  h.generateRandomLocationInZone(zoneCenter, zoneRadius), // ✅ FIXED: Random position in zone
+		IsActive:  true,
 		Properties: common.JSONB{
 			"biome":      biome,
 			"spawned_at": time.Now().Unix(),
@@ -941,14 +945,39 @@ func (h *Handler) generateGear(zoneID uuid.UUID, tier int, biome string) common.
 	}
 }
 
+// ✅ NEW: Generate random GPS coordinates within zone radius
+func (h *Handler) generateRandomLocationInZone(center common.Location, radiusMeters int) common.Location {
+	// Random angle (0-360 degrees)
+	angle := rand.Float64() * 2 * math.Pi
+
+	// Random distance (0 to radiusMeters)
+	distance := rand.Float64() * float64(radiusMeters)
+
+	// Convert to GPS coordinates
+	// 1 degree ≈ 111,000 meters at equator
+	latOffset := (distance * math.Cos(angle)) / 111000
+	lngOffset := (distance * math.Sin(angle)) / (111000 * math.Cos(center.Latitude*math.Pi/180))
+
+	return common.Location{
+		Latitude:  center.Latitude + latOffset,
+		Longitude: center.Longitude + lngOffset,
+		Timestamp: time.Now(),
+	}
+}
+
 func (h *Handler) generateArtifactName(artifactType, rarity, biome string) string {
 	biomeAdjectives := map[string]string{
 		"forest":    "Verdant",
+		"meadow":    "Blooming",
+		"hills":     "Rolling",
+		"riverside": "Flowing",
 		"swamp":     "Murky",
+		"rocky":     "Stone",
 		"desert":    "Scorched",
-		"mountain":  "Crystalline",
 		"wasteland": "Corrupted",
 		"volcanic":  "Molten",
+		"frozen":    "Glacial",
+		"abyss":     "Void",
 	}
 
 	rarityAdjectives := map[string]string{
@@ -974,11 +1003,16 @@ func (h *Handler) generateArtifactName(artifactType, rarity, biome string) strin
 func (h *Handler) generateGearName(gearType string, level int, biome string) string {
 	biomeAdjectives := map[string]string{
 		"forest":    "Wooden",
+		"meadow":    "Leather",
+		"hills":     "Stone",
+		"riverside": "Silver",
 		"swamp":     "Rusty",
+		"rocky":     "Iron",
 		"desert":    "Bronze",
-		"mountain":  "Steel",
-		"wasteland": "Iron",
+		"wasteland": "Corrupted",
 		"volcanic":  "Obsidian",
+		"frozen":    "Ice",
+		"abyss":     "Void",
 	}
 
 	biomeAdj := biomeAdjectives[biome]
@@ -1024,5 +1058,29 @@ func (h *Handler) GetZoneAnalytics(c *gin.Context) {
 		"zone_analytics": stats,
 		"timestamp":      time.Now().Format(time.RFC3339),
 		"status":         "success",
+	})
+}
+
+func (h *Handler) GetAllUsers(c *gin.Context) {
+	// Get all users (Super Admin only)
+	var users []common.User
+	if err := h.db.Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch users",
+		})
+		return
+	}
+
+	// Remove password hashes for security
+	for i := range users {
+		users[i].PasswordHash = ""
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users":        users,
+		"total_users":  len(users),
+		"message":      "Users retrieved successfully",
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"requested_by": c.GetString("username"),
 	})
 }
