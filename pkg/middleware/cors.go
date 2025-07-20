@@ -16,6 +16,7 @@ func CORS() gin.HandlerFunc {
 			"https://yourdomain.com",
 			"capacitor://localhost",
 			"ionic://localhost",
+			"*", // Added but needs verification
 		}
 
 		// Check if origin is allowed
