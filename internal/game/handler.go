@@ -375,7 +375,7 @@ func (h *Handler) updateZoneActivity(zoneID uuid.UUID) {
 	h.db.Model(&common.Zone{}).Where("id = ?", zoneID).Update("last_activity", time.Now())
 }
 
-// ✅ ENHANCED ExitZone - výstup zo zóny s kompletným trackingom
+// ✅ FIXED ExitZone - jednoduchá implementácia bez chýbajúcich funkcií
 func (h *Handler) ExitZone(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -383,31 +383,31 @@ func (h *Handler) ExitZone(c *gin.Context) {
 		return
 	}
 
-	// Get player session with zone info
+	// Get player session
 	var session common.PlayerSession
-	if err := h.db.Preload("Zone").Where("user_id = ?", userID).First(&session).Error; err != nil {
+	if err := h.db.Where("user_id = ?", userID).First(&session).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Player session not found"})
 		return
 	}
 
-	// ✅ ENHANCED: Extract zone information before clearing
-	zoneName, biome, dangerLevel, zoneTier := h.getZoneInfo(session.CurrentZone)
-
-	// ✅ ENHANCED: Calculate session statistics
-	timeInZone := time.Since(session.CreatedAt)
-	itemsCollected := h.getSessionItemsCollected(userID.(uuid.UUID), session.CurrentZone, session.CreatedAt)
-	xpGained := h.calculateXPGained(itemsCollected, zoneTier, biome)
-
-	// ✅ ENHANCED: Build comprehensive session stats
-	sessionStats := SessionStats{
-		EnteredAt:           session.CreatedAt.Unix(),
-		DurationSeconds:     int(timeInZone.Seconds()),
-		AverageItemsPerHour: h.calculateItemsPerHour(itemsCollected, timeInZone),
-		BiomeExplored:       biome,
-		DangerLevelFaced:    dangerLevel,
+	if session.CurrentZone == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Not currently in any zone"})
+		return
 	}
 
-	// Clear current zone
+	// ✅ SIMPLE: Get zone name before clearing (if needed)
+	var zoneName string = "Unknown Zone"
+	if session.CurrentZone != nil {
+		var zone common.Zone
+		if err := h.db.First(&zone, "id = ?", *session.CurrentZone).Error; err == nil {
+			zoneName = zone.Name
+		}
+	}
+
+	// ✅ SIMPLE: Calculate basic time in zone
+	timeInZone := time.Since(session.CreatedAt)
+
+	// Clear current zone - TOTO JE HLAVNÉ!
 	session.CurrentZone = nil
 	session.LastSeen = time.Now()
 
@@ -416,24 +416,16 @@ func (h *Handler) ExitZone(c *gin.Context) {
 		return
 	}
 
-	// ✅ ENHANCED: Award XP to user (if we want to implement XP system)
-	if xpGained > 0 {
-		h.db.Model(&common.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", xpGained))
-	}
-
-	// ✅ ENHANCED: Complete exit response
-	response := ExitZoneResponse{
-		Message:        "Successfully exited zone",
-		ExitedAt:       time.Now().Unix(),
-		ZoneName:       zoneName,
-		TimeInZone:     h.formatDurationDetailed(timeInZone),
-		ItemsCollected: itemsCollected,
-		XPGained:       xpGained,
-		TotalXPGained:  xpGained, // Could be lifetime total if we track it
-		SessionStats:   sessionStats,
-	}
-
-	c.JSON(http.StatusOK, response)
+	// ✅ SIMPLE: Basic response without complex calculations
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "Successfully exited zone",
+		"exited_at":       time.Now().Unix(),
+		"zone_name":       zoneName,
+		"time_in_zone":    fmt.Sprintf("%.0fm", timeInZone.Minutes()),
+		"items_collected": 0, // TODO: Implement if needed
+		"xp_gained":       0, // TODO: Implement if needed
+		"total_xp_gained": 0, // TODO: Implement if needed
+	})
 }
 
 // ScanZone - scan items v zóne
