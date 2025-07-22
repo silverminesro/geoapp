@@ -18,7 +18,7 @@ func NewHandler(db *gorm.DB) *Handler {
 	return &Handler{db: db}
 }
 
-// GET /api/v1/inventory
+// GET /api/v1/inventory/items
 func (h *Handler) GetInventory(c *gin.Context) {
 	fmt.Println("🔍 GetInventory method called!")
 	fmt.Printf("🔍 Request path: %s\n", c.Request.URL.Path)
@@ -124,7 +124,7 @@ func (h *Handler) GetInventory(c *gin.Context) {
 	})
 }
 
-// GET /api/v1/inventory/summary
+// ✅ ENHANCED: GET /api/v1/inventory/summary
 func (h *Handler) GetInventorySummary(c *gin.Context) {
 	fmt.Println("🔍 GetInventorySummary method called!")
 	fmt.Printf("🔍 Request path: %s\n", c.Request.URL.Path)
@@ -140,14 +140,14 @@ func (h *Handler) GetInventorySummary(c *gin.Context) {
 
 	fmt.Printf("✅ User ID found: %v\n", userID)
 
-	// Count by item type - ✅ FIXED: Use table name
+	// Count by item type - ✅ Use table name explicitly
 	var artifactCount, gearCount int64
 	h.db.Table("inventory_items").Where("user_id = ? AND item_type = ? AND deleted_at IS NULL", userID, "artifact").Count(&artifactCount)
 	h.db.Table("inventory_items").Where("user_id = ? AND item_type = ? AND deleted_at IS NULL", userID, "gear").Count(&gearCount)
 
 	fmt.Printf("✅ Summary counts: artifacts=%d, gear=%d\n", artifactCount, gearCount)
 
-	// Count by rarity (from properties) - ✅ FIXED: Use raw SQL
+	// ✅ Count by rarity (from properties JSON)
 	var rarityStats map[string]int64 = make(map[string]int64)
 
 	rows, err := h.db.Raw(`
@@ -173,14 +173,43 @@ func (h *Handler) GetInventorySummary(c *gin.Context) {
 
 	fmt.Printf("✅ Rarity stats: %v\n", rarityStats)
 
+	// ✅ Count by biome (from properties JSON)
+	var biomeStats map[string]int64 = make(map[string]int64)
+
+	biomeRows, err := h.db.Raw(`
+		SELECT 
+			properties->>'biome' as biome,
+			COUNT(*) as count
+		FROM inventory_items 
+		WHERE user_id = ? AND deleted_at IS NULL 
+		AND properties->>'biome' IS NOT NULL
+		GROUP BY properties->>'biome'
+	`, userID).Rows()
+
+	if err == nil {
+		defer biomeRows.Close()
+		for biomeRows.Next() {
+			var biome string
+			var count int64
+			if err := biomeRows.Scan(&biome, &count); err == nil {
+				biomeStats[biome] = count
+			}
+		}
+	}
+
+	fmt.Printf("✅ Biome stats: %v\n", biomeStats)
+
+	// ✅ CRITICAL FIX: Return JSON object, NOT string!
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"summary": gin.H{
+		"summary": gin.H{ // ✅ THIS IS A JSON OBJECT!
 			"total_items":     artifactCount + gearCount,
 			"total_artifacts": artifactCount,
 			"total_gear":      gearCount,
 			"by_rarity":       rarityStats,
+			"by_biome":        biomeStats,
 		},
+		"message":   "Inventory summary retrieved successfully",
 		"timestamp": time.Now().Format(time.RFC3339),
 	})
 }
@@ -210,7 +239,7 @@ func (h *Handler) DeleteItem(c *gin.Context) {
 
 	fmt.Printf("✅ About to delete item: %s for user: %v\n", itemID, userID)
 
-	// Find item first - ✅ FIXED: Use raw query
+	// Find item first - ✅ Use table name explicitly
 	var item map[string]interface{}
 	if err := h.db.Table("inventory_items").Where("id = ? AND user_id = ? AND deleted_at IS NULL", itemID, userID).First(&item).Error; err != nil {
 		fmt.Printf("❌ Failed to find item: %v\n", err)
@@ -224,7 +253,7 @@ func (h *Handler) DeleteItem(c *gin.Context) {
 
 	fmt.Printf("✅ Item found: %v\n", item["id"])
 
-	// Soft delete - ✅ FIXED: Use raw update
+	// Soft delete - ✅ Use table name explicitly
 	if err := h.db.Table("inventory_items").Where("id = ? AND user_id = ?", itemID, userID).Update("deleted_at", time.Now()).Error; err != nil {
 		fmt.Printf("❌ Failed to delete item: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete item"})
@@ -233,11 +262,13 @@ func (h *Handler) DeleteItem(c *gin.Context) {
 
 	fmt.Printf("✅ Item deleted successfully: %s\n", itemID)
 
-	// Get item name from properties
-	var itemName string
+	// Get item name from properties JSON
+	var itemName string = "Unknown Item"
 	if properties, ok := item["properties"].(map[string]interface{}); ok {
 		if name, exists := properties["name"]; exists {
-			itemName = name.(string)
+			if nameStr, ok := name.(string); ok {
+				itemName = nameStr
+			}
 		}
 	}
 
