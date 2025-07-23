@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -11,16 +12,19 @@ import (
 
 	"geoanomaly/internal/common"
 	"geoanomaly/internal/game"
+	"geoanomaly/pkg/middleware" // 🛡️ PRIDANÉ
 
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9" // 🛡️ PRIDANÉ
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 var (
-	db        *gorm.DB
-	startTime time.Time
-	scheduler *game.Scheduler
+	db          *gorm.DB
+	redisClient *redis.Client // 🛡️ PRIDANÉ
+	startTime   time.Time
+	scheduler   *game.Scheduler
 )
 
 func init() {
@@ -48,6 +52,17 @@ func main() {
 	}
 	log.Println("✅ Environment configuration validated")
 
+	// 🛡️ NOVÉ: Initialize Redis connection
+	redisClient = initRedis()
+	if redisClient != nil {
+		log.Println("✅ Redis connected successfully")
+
+		// 🛡️ NOVÉ: Load blacklist from Redis
+		middleware.LoadBlacklistFromRedis(redisClient)
+	} else {
+		log.Println("⚠️  Redis disabled - security middleware will work without persistence")
+	}
+
 	// Initialize database connection
 	var err error
 	db, err = initDB()
@@ -68,9 +83,6 @@ func main() {
 	}
 	log.Println("✅ Database migrations status verified")
 
-	// Skip Redis for now
-	log.Println("⚠️  Redis disabled for testing - focusing on database")
-
 	// ✅ NEW: Start zone cleanup scheduler
 	log.Println("🕐 Starting Zone TTL Cleanup Scheduler...")
 	scheduler = game.NewScheduler(db)
@@ -80,8 +92,8 @@ func main() {
 	// Setup graceful shutdown
 	setupGracefulShutdown()
 
-	// Setup routes
-	router := setupRoutes(db)
+	// 🛡️ NOVÉ: Setup routes with security middleware
+	router := setupRoutes(db, redisClient)
 
 	// Get server configuration from .env
 	port := getEnvVar("PORT", "8080")
@@ -95,10 +107,37 @@ func main() {
 	log.Printf("🌐 Server starting on %s", serverAddr)
 	log.Printf("📱 Flutter can connect to: http://%s/api/v1", serverAddr)
 	log.Printf("🧹 Zone cleanup running every 5 minutes")
+	log.Printf("🛡️ Security middleware active - CONNECT attacks blocked")
 
 	if err := router.Run(serverAddr); err != nil {
 		log.Fatalf("❌ Server failed to start: %v", err)
 	}
+}
+
+// 🛡️ NOVÉ: Initialize Redis connection
+func initRedis() *redis.Client {
+	redisAddr := getEnvVar("REDIS_ADDR", "localhost:6379")
+	redisPassword := getEnvVar("REDIS_PASSWORD", "")
+	redisDB := 0
+
+	log.Printf("🔌 Connecting to Redis at %s...", redisAddr)
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     redisAddr,
+		Password: redisPassword,
+		DB:       redisDB,
+	})
+
+	// Test connection s context.Background()
+	ctx := context.Background()
+	_, err := client.Ping(ctx).Result()
+	if err != nil {
+		log.Printf("⚠️  Redis connection failed: %v", err)
+		log.Println("⚠️  Security middleware will work without Redis persistence")
+		return nil
+	}
+
+	return client
 }
 
 // ✅ NEW: Setup graceful shutdown
@@ -114,6 +153,12 @@ func setupGracefulShutdown() {
 		if scheduler != nil {
 			scheduler.Stop()
 			log.Println("✅ Zone cleanup scheduler stopped")
+		}
+
+		// 🛡️ NOVÉ: Close Redis connection
+		if redisClient != nil {
+			redisClient.Close()
+			log.Println("✅ Redis connection closed")
 		}
 
 		// Close database connection
@@ -253,6 +298,10 @@ func setDefaultEnvVars() {
 		"DB_SSLMODE":  "disable",
 		"DB_TIMEZONE": "UTC",
 
+		// 🛡️ NOVÉ: Redis defaults
+		"REDIS_ADDR":     "localhost:6379",
+		"REDIS_PASSWORD": "",
+
 		// JWT (fallback, .env should override)
 		"JWT_SECRET":     "your-super-secret-jwt-key-change-this-in-production",
 		"JWT_EXPIRES_IN": "24h",
@@ -284,6 +333,7 @@ func printServerInfo(host, port string) {
 	// Get config from .env
 	dbName := getEnvVar("DB_NAME", "geoanomaly")
 	dbHost := getEnvVar("DB_HOST", "localhost")
+	redisAddr := getEnvVar("REDIS_ADDR", "localhost:6379")
 	jwtSecret := getEnvVar("JWT_SECRET", "")
 
 	separator := strings.Repeat("=", 60)
@@ -296,6 +346,12 @@ func printServerInfo(host, port string) {
 	fmt.Printf("🔗 API Base:      http://%s:%s/api/v1\n", host, port)
 	fmt.Printf("⏱️  Startup Time:  %v\n", uptime)
 	fmt.Printf("🗄️  Database:      %s@%s\n", dbName, dbHost)
+	fmt.Printf("🔴 Redis:         %s %s\n", redisAddr, func() string {
+		if redisClient != nil {
+			return "✅"
+		}
+		return "❌"
+	}())
 	fmt.Printf("🔑 JWT Configured: %s\n", func() string {
 		if len(jwtSecret) >= 32 {
 			return "✅ Yes"
@@ -303,6 +359,7 @@ func printServerInfo(host, port string) {
 		return "❌ No"
 	}())
 	fmt.Printf("🧹 Zone Cleanup:  ✅ Active (5min)\n")
+	fmt.Printf("🛡️ Security:      ✅ Active (CONNECT blocked)\n") // 🛡️ NOVÉ
 	fmt.Printf("🚀 Status:        Ready for connections\n")
 	fmt.Println(separator)
 
@@ -321,6 +378,19 @@ func printServerInfo(host, port string) {
 	fmt.Printf("Expired Zones:  GET  http://%s:%s/api/v1/admin/zones/expired\n", host, port)
 	fmt.Printf("Zone Analytics: GET  http://%s:%s/api/v1/admin/analytics/zones\n", host, port)
 
+	// 🛡️ NOVÉ: Security info
+	fmt.Println("\n🛡️ SECURITY STATUS:")
+	fmt.Println("• CONNECT attacks blocked automatically")
+	fmt.Println("• 4 IPs pre-blacklisted from recent attacks")
+	fmt.Println("• Rate limiting: 20 req/min (unauthenticated)")
+	fmt.Println("• Suspicious path detection active")
+	fmt.Println("• Auto-blacklisting for repeat offenders")
+	if redisClient != nil {
+		fmt.Println("• Redis persistence for blacklist enabled")
+	} else {
+		fmt.Println("• Redis persistence disabled (in-memory only)")
+	}
+
 	fmt.Println("\n💾 DATABASE STATUS:")
 	fmt.Println("• All main tables exist")
 	fmt.Println("• 5 tier definitions configured")
@@ -331,5 +401,6 @@ func printServerInfo(host, port string) {
 	fmt.Println("\n🔥 Server Ready! Test endpoints now!")
 	fmt.Printf("💡 Try: curl http://%s:%s/health\n", host, port)
 	fmt.Printf("🧹 Zone cleanup runs every 5 minutes automatically\n")
+	fmt.Printf("🛡️ Security: Try CONNECT attack to test blocking\n")
 	fmt.Println(separator + "\n")
 }
