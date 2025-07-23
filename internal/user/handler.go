@@ -37,6 +37,8 @@ type UserProfileResponse struct {
 	Username  string                 `json:"username"`
 	Email     string                 `json:"email"`
 	Tier      int                    `json:"tier"`
+	XP        int                    `json:"xp"`
+	Level     int                    `json:"level"`
 	IsActive  bool                   `json:"is_active"`
 	CreatedAt time.Time              `json:"created_at"`
 	Stats     UserStats              `json:"stats"`
@@ -87,6 +89,8 @@ func (h *Handler) GetProfile(c *gin.Context) {
 		Username:  user.Username,
 		Email:     user.Email,
 		Tier:      user.Tier,
+		XP:        user.XP,
+		Level:     user.Level,
 		IsActive:  user.IsActive,
 		CreatedAt: user.CreatedAt,
 		Stats:     stats,
