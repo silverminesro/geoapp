@@ -17,6 +17,14 @@ type SecurityMiddleware struct {
 	client *redis.Client
 }
 
+// 🛡️ WHITELIST: Development/Admin IPs (never blacklist these)
+var whitelistedIPs = map[string]bool{
+	"91.127.107.191": true, // silverminesro - development IP
+	"127.0.0.1":      true, // localhost
+	"::1":            true, // localhost IPv6
+	"localhost":      true, // localhost domain
+}
+
 // Blacklisted IPs from recent attacks
 var blacklistedIPs = map[string]bool{
 	"35.193.149.100": true,
@@ -25,15 +33,16 @@ var blacklistedIPs = map[string]bool{
 	"204.76.203.193": true,
 }
 
-// Suspicious paths that indicate attacks
+// 🛡️ OPRAVENÉ: Suspicious paths (odstránené legitímne API cesty)
 var suspiciousPaths = []string{
 	"/boaform/", "/admin/", "/.env", "/wp-admin/",
-	"/.git/", "/config", "/json", "/api/v1/",
-	"/phpmyadmin/", "/.well-known/", "/xmlrpc.php",
-	"/wp-content/", "/cgi-bin/", "/vendor/",
+	"/.git/", "/config", "/phpmyadmin/", "/.well-known/",
+	"/xmlrpc.php", "/wp-content/", "/cgi-bin/", "/vendor/",
 	"/backup/", "/db/", "/database/", "/sql/",
 	"/config.php", "/wp-config.php", "/.htaccess",
 	"/robots.txt", "/sitemap.xml", "/feed",
+	"/shell", "/webshell", "/backdoor", "/exploit",
+	// 🚫 ODSTRÁNENÉ: "/json", "/api/v1/" - tieto sú legitímne!
 }
 
 // 🛡️ HLAVNÁ FUNKCIA: Security middleware s Redis
@@ -49,6 +58,13 @@ func BasicSecurity() gin.HandlerFunc {
 		method := c.Request.Method
 		path := c.Request.URL.Path
 		userAgent := c.Request.UserAgent()
+
+		// 🟢 NOVÉ: Whitelist check - NIKDY neblokuj whitelisted IPs
+		if whitelistedIPs[clientIP] {
+			log.Printf("🟢 [SECURITY] WHITELISTED IP allowed: %s %s %s", clientIP, method, path)
+			c.Next()
+			return
+		}
 
 		// 1. 🚨 CONNECT method blocking (najdôležitejšie!)
 		if method == "CONNECT" {
@@ -73,7 +89,7 @@ func BasicSecurity() gin.HandlerFunc {
 			return
 		}
 
-		// 3. ⚠️ Basic suspicious path detection
+		// 3. ⚠️ OPRAVENÉ: Suspicious path detection (presnejšie)
 		for _, suspPath := range suspiciousPaths {
 			if strings.Contains(path, suspPath) {
 				log.Printf("⚠️ [SECURITY] SUSPICIOUS PATH from %s: %s %s", clientIP, method, path)
@@ -87,14 +103,14 @@ func BasicSecurity() gin.HandlerFunc {
 			}
 		}
 
-		// 4. 🤖 Basic bot detection
+		// 4. 🤖 Basic bot detection (iba log)
 		if isSuspiciousBot(userAgent) {
 			log.Printf("🤖 [SECURITY] SUSPICIOUS BOT from %s: %s", clientIP, userAgent)
 			// Don't auto-blacklist bots immediately in basic mode
 		}
 
 		// 5. ✅ Log legitimate traffic (except health checks)
-		if path != "/health" && path != "/api/v1/health" && path != "/api/v1/system/health" {
+		if !isHealthCheckPath(path) {
 			log.Printf("✅ [SECURITY] ALLOWED: %s %s %s", clientIP, method, path)
 		}
 
@@ -109,6 +125,15 @@ func (sm *SecurityMiddleware) securityCheck() gin.HandlerFunc {
 		method := c.Request.Method
 		path := c.Request.URL.Path
 		userAgent := c.Request.UserAgent()
+
+		// 🟢 NOVÉ: Whitelist check - NIKDY neblokuj whitelisted IPs
+		if whitelistedIPs[clientIP] {
+			if !isHealthCheckPath(path) {
+				log.Printf("🟢 [SECURITY] WHITELISTED IP allowed: %s %s %s", clientIP, method, path)
+			}
+			c.Next()
+			return
+		}
 
 		// 1. 🚫 Blacklist check
 		if blacklistedIPs[clientIP] {
@@ -137,7 +162,7 @@ func (sm *SecurityMiddleware) securityCheck() gin.HandlerFunc {
 			return
 		}
 
-		// 3. ⚠️ Suspicious path detection
+		// 3. ⚠️ OPRAVENÉ: Suspicious path detection (presnejšie)
 		for _, suspPath := range suspiciousPaths {
 			if strings.Contains(path, suspPath) {
 				log.Printf("⚠️ [SECURITY] SUSPICIOUS PATH from %s: %s %s", clientIP, method, path)
@@ -159,19 +184,20 @@ func (sm *SecurityMiddleware) securityCheck() gin.HandlerFunc {
 			}
 		}
 
-		// 4. 🤖 Bot detection (advanced)
+		// 4. 🤖 Bot detection (advanced) - menej agresívne
 		if sm.isSuspiciousBot(userAgent) {
 			log.Printf("🤖 [SECURITY] SUSPICIOUS BOT from %s: %s", clientIP, userAgent)
 
+			// 🛡️ OPRAVENÉ: Vyššie threshold pre bot blacklisting
 			botCount := sm.incrementBotCount(clientIP)
-			if botCount >= 5 {
-				log.Printf("🚫 [SECURITY] AUTO-BLACKLISTED: %s (5+ bot attempts)", clientIP)
+			if botCount >= 10 { // Zvýšené z 5 na 10
+				log.Printf("🚫 [SECURITY] AUTO-BLACKLISTED: %s (10+ bot attempts)", clientIP)
 				blacklistedIPs[clientIP] = true
 				sm.saveToRedisBlacklist(clientIP, "BOT_DETECTION")
 			}
 		}
 
-		// 5. 📊 Enhanced rate limiting for unauthenticated users
+		// 5. 📊 Enhanced rate limiting for unauthenticated users (menej agresívne)
 		if _, exists := c.Get("user_id"); !exists {
 			if !sm.checkUnauthenticatedRateLimit(clientIP) {
 				log.Printf("🚫 [SECURITY] UNAUTHENTICATED RATE LIMIT: %s", clientIP)
@@ -185,7 +211,7 @@ func (sm *SecurityMiddleware) securityCheck() gin.HandlerFunc {
 			}
 		}
 
-		// 6. 🌐 Geographic IP filtering (bonus)
+		// 6. 🌐 Geographic IP filtering (iba log)
 		if sm.isFromSuspiciousCountry(clientIP) {
 			log.Printf("🌍 [SECURITY] SUSPICIOUS COUNTRY from %s", clientIP)
 			// Don't block immediately, just log for now
@@ -232,6 +258,7 @@ func (sm *SecurityMiddleware) incrementBotCount(ip string) int {
 	return int(val)
 }
 
+// 🛡️ OPRAVENÉ: Menej agresívne rate limiting
 func (sm *SecurityMiddleware) checkUnauthenticatedRateLimit(ip string) bool {
 	if sm.client == nil {
 		return true // Basic mode - no rate limiting
@@ -250,8 +277,8 @@ func (sm *SecurityMiddleware) checkUnauthenticatedRateLimit(ip string) bool {
 		count, _ = strconv.Atoi(val)
 	}
 
-	// 20 requests per minute for unauthenticated users
-	if count >= 20 {
+	// 🛡️ OPRAVENÉ: Zvýšené z 20 na 100 req/min pre development
+	if count >= 100 {
 		return false
 	}
 
@@ -264,21 +291,20 @@ func (sm *SecurityMiddleware) isSuspiciousBot(userAgent string) bool {
 	return isSuspiciousBot(userAgent)
 }
 
-// Static function for both modes
+// 🛡️ OPRAVENÉ: Menej agresívna bot detection
 func isSuspiciousBot(userAgent string) bool {
 	suspiciousBots := []string{
-		"curl", "wget", "python", "scanner", "bot",
-		"crawler", "spider", "scraper", "httpclient",
-		"masscan", "nmap", "nuclei", "sqlmap",
+		"scanner", "masscan", "nmap", "nuclei", "sqlmap",
 		"gobuster", "dirb", "nikto", "burp",
-		"postman", "insomnia", "httpie",
+		// 🛡️ ODSTRÁNENÉ: "curl", "wget", "python", "postman" - tieto sú legitímne development tools!
 	}
 
 	userAgentLower := strings.ToLower(userAgent)
 
-	// Empty user agent is suspicious
+	// 🛡️ OPRAVENÉ: Empty user agent nie je automaticky suspicious
 	if userAgent == "" {
-		return true
+		log.Printf("🤖 [SECURITY] Empty user agent detected")
+		return false // Zmenené z true na false
 	}
 
 	for _, bot := range suspiciousBots {
@@ -297,10 +323,12 @@ func (sm *SecurityMiddleware) isFromSuspiciousCountry(ip string) bool {
 		strings.HasPrefix(ip, "192.168.")
 }
 
+// 🛡️ ROZŠÍRENÉ: Viac health check paths
 func isHealthCheckPath(path string) bool {
 	healthPaths := []string{
 		"/health", "/api/v1/health", "/api/v1/system/health",
-		"/ping", "/status", "/api/v1/status",
+		"/ping", "/status", "/api/v1/status", "/api/v1/test",
+		"/info", "/api/v1/info", // Pridané info endpointy
 	}
 
 	for _, healthPath := range healthPaths {
@@ -341,6 +369,7 @@ func LoadBlacklistFromRedis(client *redis.Client) {
 	if client == nil {
 		log.Printf("🛡️ [SECURITY] Redis not available - using in-memory blacklist only")
 		log.Printf("🛡️ [SECURITY] Loaded %d pre-configured blacklisted IPs", len(blacklistedIPs))
+		log.Printf("🟢 [SECURITY] Whitelisted %d development IPs", len(whitelistedIPs))
 		return
 	}
 
@@ -353,7 +382,7 @@ func LoadBlacklistFromRedis(client *redis.Client) {
 	loadedCount := 0
 	for _, key := range keys {
 		ip := strings.TrimPrefix(key, "blacklist:")
-		if ip != "" {
+		if ip != "" && !whitelistedIPs[ip] { // 🛡️ OPRAVENÉ: Nekontroluj whitelisted IPs
 			blacklistedIPs[ip] = true
 			loadedCount++
 		}
@@ -363,6 +392,7 @@ func LoadBlacklistFromRedis(client *redis.Client) {
 	log.Printf("🛡️ [SECURITY] Loaded %d blacklisted IPs from Redis", loadedCount)
 	log.Printf("🛡️ [SECURITY] Total blacklisted IPs: %d (Redis: %d, Pre-configured: %d)",
 		total, loadedCount, total-loadedCount)
+	log.Printf("🟢 [SECURITY] Whitelisted %d development IPs (never blocked)", len(whitelistedIPs))
 }
 
 // 🛡️ ADMIN FUNCTIONS
@@ -377,10 +407,34 @@ func GetBlacklist() map[string]bool {
 	return result
 }
 
+// 🛡️ NOVÉ: Get current whitelist
+func GetWhitelist() map[string]bool {
+	result := make(map[string]bool)
+	for ip, status := range whitelistedIPs {
+		result[ip] = status
+	}
+	return result
+}
+
 // Add IP to blacklist manually (for admin endpoints)
 func AddToBlacklist(ip, reason string) {
+	if whitelistedIPs[ip] {
+		log.Printf("🟢 [SECURITY] Cannot blacklist whitelisted IP: %s", ip)
+		return
+	}
 	blacklistedIPs[ip] = true
 	log.Printf("🛡️ [SECURITY] Manually blacklisted IP: %s (reason: %s)", ip, reason)
+}
+
+// 🛡️ NOVÉ: Add IP to whitelist manually
+func AddToWhitelist(ip, reason string) {
+	whitelistedIPs[ip] = true
+	// Remove from blacklist if exists
+	if blacklistedIPs[ip] {
+		delete(blacklistedIPs, ip)
+		log.Printf("🟢 [SECURITY] Removed %s from blacklist (now whitelisted)", ip)
+	}
+	log.Printf("🟢 [SECURITY] Manually whitelisted IP: %s (reason: %s)", ip, reason)
 }
 
 // Remove IP from blacklist (for admin endpoints)
@@ -397,10 +451,11 @@ func RemoveFromBlacklist(ip string) bool {
 func GetSecurityStats() map[string]interface{} {
 	return map[string]interface{}{
 		"blacklisted_ips":  len(blacklistedIPs),
+		"whitelisted_ips":  len(whitelistedIPs),
 		"suspicious_paths": len(suspiciousPaths),
 		"connect_blocking": "enabled",
-		"rate_limiting":    "enabled",
-		"bot_detection":    "enabled",
+		"rate_limiting":    "100 req/min (development mode)",
+		"bot_detection":    "enabled (less aggressive)",
 		"auto_blacklist":   "enabled",
 		"last_updated":     time.Now().Format("2006-01-02 15:04:05"),
 	}
