@@ -98,80 +98,65 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ ENHANCED: spawnDynamicZones with TTL system
+// ✅ REFAKTOROVANÉ: spawnDynamicZones používa templates z biomes.go
 func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []common.Zone {
 	var newZones []common.Zone
 
 	for i := 0; i < count; i++ {
-		// ✅ NEW: Random TTL between 6-24 hours
-		minTTL := 6 * time.Hour
-		maxTTL := 24 * time.Hour
+		// ✅ ZMENA: použiť nový selectBiome
+		biome := h.selectBiome(tier)
+		template := GetZoneTemplate(biome)
+
+		// Random TTL between 6-24 hours
+		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
+		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
 		ttlRange := maxTTL - minTTL
 		randomTTL := minTTL + time.Duration(rand.Float64()*float64(ttlRange))
-
-		// Calculate expiry time
 		expiresAt := time.Now().Add(randomTTL)
-
-		// Generate biome for this tier
-		biome := h.selectBiome(tier)
 
 		zone := common.Zone{
 			BaseModel: common.BaseModel{ID: uuid.New()},
-			Name:      h.generateZoneName(tier),
+			Name:      h.generateZoneName(biome), // ✅ ZMENA: nová funkcia
 			Location: common.Location{
 				Latitude:  lat + (rand.Float64()-0.5)*0.01,
 				Longitude: lng + (rand.Float64()-0.5)*0.01,
 				Timestamp: time.Now(),
 			},
-			TierRequired: tier,
+			TierRequired: template.MinTierRequired, // ✅ ZMENA: z template
 			RadiusMeters: h.calculateZoneRadius(tier),
 			IsActive:     true,
 			ZoneType:     "dynamic",
 			Biome:        biome,
-			DangerLevel:  h.calculateDangerLevel(tier),
+			DangerLevel:  template.DangerLevel, // ✅ ZMENA: z template
 
-			// ✅ NEW: TTL fields
+			// TTL fields
 			ExpiresAt:    &expiresAt,
 			LastActivity: time.Now(),
 			AutoCleanup:  true,
 
 			Properties: common.JSONB{
-				"spawned_by":   "scan_area",
-				"ttl_hours":    randomTTL.Hours(),
-				"biome":        biome,
-				"danger_level": h.calculateDangerLevel(tier),
+				"spawned_by":            "scan_area",
+				"ttl_hours":             randomTTL.Hours(),
+				"biome":                 biome,
+				"danger_level":          template.DangerLevel,
+				"environmental_effects": template.EnvironmentalEffects, // ✅ NOVÉ
+				"zone_template":         "biome_based",
 			},
 		}
 
 		if err := h.db.Create(&zone).Error; err == nil {
-			// ✅ FIXED: Spawn items in new zone with zone location
+			// ✅ ZMENA: nová spawnItemsInZone funkcia
 			h.spawnItemsInZone(zone.ID, tier, zone.Biome, zone.Location, zone.RadiusMeters)
 			newZones = append(newZones, zone)
 
-			log.Printf("🏰 Zone spawned: %s (TTL: %.1fh, expires: %s)",
-				zone.Name, randomTTL.Hours(), expiresAt.Format("15:04"))
+			log.Printf("🏰 Zone spawned: %s (Biome: %s, TTL: %.1fh, expires: %s)",
+				zone.Name, biome, randomTTL.Hours(), expiresAt.Format("15:04"))
 		} else {
 			log.Printf("❌ Failed to create zone: %v", err)
 		}
 	}
 
 	return newZones
-}
-
-// ✅ NEW: Helper function for danger level calculation
-func (h *Handler) calculateDangerLevel(tier int) string {
-	switch tier {
-	case 0, 1:
-		return "low"
-	case 2:
-		return "medium"
-	case 3:
-		return "high"
-	case 4:
-		return "extreme"
-	default:
-		return "low"
-	}
 }
 
 // GetNearbyZones - získanie zón v okolí
@@ -325,7 +310,7 @@ func (h *Handler) EnterZone(c *gin.Context) {
 		return
 	}
 
-	// ✅ NEW: Update zone activity
+	// Update zone activity
 	h.updateZoneActivity(zone.ID)
 
 	// Update player session
@@ -370,12 +355,12 @@ func (h *Handler) EnterZone(c *gin.Context) {
 	})
 }
 
-// ✅ NEW: Helper function to update zone activity
+// Helper function to update zone activity
 func (h *Handler) updateZoneActivity(zoneID uuid.UUID) {
 	h.db.Model(&common.Zone{}).Where("id = ?", zoneID).Update("last_activity", time.Now())
 }
 
-// ✅ FIXED ExitZone - jednoduchá implementácia bez chýbajúcich funkcií
+// ExitZone - jednoduchá implementácia
 func (h *Handler) ExitZone(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -395,7 +380,7 @@ func (h *Handler) ExitZone(c *gin.Context) {
 		return
 	}
 
-	// ✅ SIMPLE: Get zone name before clearing (if needed)
+	// Get zone name before clearing
 	var zoneName string = "Unknown Zone"
 	if session.CurrentZone != nil {
 		var zone common.Zone
@@ -404,10 +389,10 @@ func (h *Handler) ExitZone(c *gin.Context) {
 		}
 	}
 
-	// ✅ SIMPLE: Calculate basic time in zone
+	// Calculate basic time in zone
 	timeInZone := time.Since(session.CreatedAt)
 
-	// Clear current zone - TOTO JE HLAVNÉ!
+	// Clear current zone
 	session.CurrentZone = nil
 	session.LastSeen = time.Now()
 
@@ -416,7 +401,6 @@ func (h *Handler) ExitZone(c *gin.Context) {
 		return
 	}
 
-	// ✅ SIMPLE: Basic response without complex calculations
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "Successfully exited zone",
 		"exited_at":       time.Now().Unix(),
@@ -476,7 +460,7 @@ func (h *Handler) ScanZone(c *gin.Context) {
 		return
 	}
 
-	// ✅ NEW: Update zone activity on scan
+	// Update zone activity on scan
 	h.updateZoneActivity(zone.ID)
 
 	// Get items in zone (filtered by tier)
@@ -542,7 +526,7 @@ func (h *Handler) CollectItem(c *gin.Context) {
 		return
 	}
 
-	// ✅ NEW: Update zone activity on collection
+	// Update zone activity on collection
 	h.updateZoneActivity(zone.ID)
 
 	// Check if player is in zone
@@ -605,13 +589,12 @@ func (h *Handler) CollectItem(c *gin.Context) {
 		}
 		h.db.Create(&inventory)
 
-		// ✅ NEW: Award XP for artifact (len pre artifacts!)
+		// Award XP for artifact
 		xpHandler := xp.NewHandler(h.db)
 		var err error
 		xpResult, err = xpHandler.AwardArtifactXP(user.ID, artifact.Rarity, artifact.Biome, zone.TierRequired)
 		if err != nil {
 			log.Printf("❌ Failed to award XP: %v", err)
-			// Continue anyway - don't fail the collection
 		}
 
 		collectedItem = artifact
@@ -664,11 +647,11 @@ func (h *Handler) CollectItem(c *gin.Context) {
 		return
 	}
 
-	// ✅ NEW: Check if zone should be marked for empty cleanup
+	// Check if zone should be marked for empty cleanup
 	zoneUUID, _ := uuid.Parse(zoneID)
 	go h.checkAndCleanupEmptyZone(zoneUUID)
 
-	// ✅ ENHANCED: Response s XP systémom
+	// Enhanced response s XP systémom
 	response := gin.H{
 		"message":      "Item collected successfully",
 		"item":         collectedItem,
@@ -681,7 +664,7 @@ func (h *Handler) CollectItem(c *gin.Context) {
 		"new_total":    user.TotalArtifacts + user.TotalGear + 1,
 	}
 
-	// ✅ Add XP data if successful (len pre artifacts)
+	// Add XP data if successful (len pre artifacts)
 	if req.ItemType == "artifact" && xpResult != nil {
 		response["xp_gained"] = xpResult.XPGained
 		response["total_xp"] = xpResult.TotalXP
@@ -698,7 +681,7 @@ func (h *Handler) CollectItem(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ NEW: Check and cleanup empty zone
+// Check and cleanup empty zone
 func (h *Handler) checkAndCleanupEmptyZone(zoneID uuid.UUID) {
 	// Wait a bit to allow for multiple rapid collections
 	time.Sleep(30 * time.Second)
@@ -801,143 +784,209 @@ func (h *Handler) GetItemAnalytics(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GetAllUsers(c *gin.Context) {
+	// Get all users (Super Admin only)
+	var users []common.User
+	if err := h.db.Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch users",
+		})
+		return
+	}
+
+	// Remove password hashes for security
+	for i := range users {
+		users[i].PasswordHash = ""
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users":        users,
+		"total_users":  len(users),
+		"message":      "Users retrieved successfully",
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"requested_by": c.GetString("username"),
+	})
+}
+
 // ============================================
-// HELPER FUNCTIONS FOR ZONE CREATION
+// ✅ REFAKTOROVANÉ HELPER FUNCTIONS
 // ============================================
 
-// ✅ NEW: Missing helper functions
+// ✅ NOVÉ: selectBiome používa getAvailableBiomes z zones.go
 func (h *Handler) selectBiome(tier int) string {
-	biomes := map[int][]string{
-		0: {"forest", "meadow", "grassland"},
-		1: {"forest", "meadow", "hills", "riverside"},
-		2: {"hills", "forest", "swamp", "rocky"},
-		3: {"swamp", "rocky", "desert", "wasteland"},
-		4: {"wasteland", "volcanic", "frozen", "abyss"},
+	availableBiomes := h.getAvailableBiomes(tier)
+	if len(availableBiomes) == 0 {
+		return BiomeForest // fallback
 	}
-
-	if biomesForTier, exists := biomes[tier]; exists {
-		return biomesForTier[rand.Intn(len(biomesForTier))]
-	}
-	return "forest" // Default fallback
+	return availableBiomes[rand.Intn(len(availableBiomes))]
 }
 
-func (h *Handler) generateZoneName(tier int) string {
-	prefixes := map[int][]string{
-		0: {"Peaceful", "Quiet", "Serene", "Gentle"},
-		1: {"Silent", "Hidden", "Mystic", "Ancient"},
-		2: {"Dark", "Shadowy", "Twisted", "Forgotten"},
-		3: {"Cursed", "Rotten", "Haunted", "Corrupted"},
-		4: {"Infernal", "Void", "Nightmare", "Apocalyptic"},
+// ✅ NOVÉ: generateZoneName používa GetZoneTemplate z biomes.go
+func (h *Handler) generateZoneName(biome string) string {
+	template := GetZoneTemplate(biome)
+	if len(template.Names) == 0 {
+		return fmt.Sprintf("Unknown %s Zone", biome)
 	}
-
-	suffixes := map[int][]string{
-		0: {"Grove", "Garden", "Clearing", "Haven"},
-		1: {"Thicket", "Glen", "Hollow", "Sanctuary"},
-		2: {"Woods", "Cavern", "Ruins", "Crypt"},
-		3: {"Swamp", "Pit", "Graveyard", "Wasteland"},
-		4: {"Abyss", "Inferno", "Vortex", "Realm"},
-	}
-
-	tierPrefixes := prefixes[0] // Default
-	tierSuffixes := suffixes[0] // Default
-
-	if p, exists := prefixes[tier]; exists {
-		tierPrefixes = p
-	}
-	if s, exists := suffixes[tier]; exists {
-		tierSuffixes = s
-	}
-
-	prefix := tierPrefixes[rand.Intn(len(tierPrefixes))]
-	suffix := tierSuffixes[rand.Intn(len(tierSuffixes))]
-
-	return fmt.Sprintf("%s %s (T%d)", prefix, suffix, tier)
+	return template.Names[rand.Intn(len(template.Names))]
 }
 
-// ✅ FIXED: spawnItemsInZone now gets zone location and radius
+// ✅ ENHANCED: spawnItemsInZone s konfigurovateľnými spawn rates
 func (h *Handler) spawnItemsInZone(zoneID uuid.UUID, tier int, biome string, zoneCenter common.Location, zoneRadius int) {
-	// ✅ FIXED: Spawn artifacts with zone location data
-	artifactCount := rand.Intn(3) + 1 // 1-3 artifacts
-	for i := 0; i < artifactCount; i++ {
-		artifact := h.generateArtifact(zoneID, tier, biome, zoneCenter, zoneRadius)
-		if err := h.db.Create(&artifact).Error; err != nil {
-			log.Printf("❌ Failed to create artifact: %v", err)
+	template := GetZoneTemplate(biome)
+
+	// ✅ KONFIGUROVATEĽNÉ NASTAVENIA - zmeň tieto hodnoty podľa potreby
+	const (
+		// Základné spawn rates (0.0 = 0%, 1.0 = 100%)
+		baseArtifactSpawnRate = 0.8  // 80% šanca na artifact spawn
+		baseGearSpawnRate     = 0.7  // 70% šanca na gear spawn
+		exclusiveSpawnRate    = 0.15 // 15% šanca na exclusive artifacts
+
+		// Multiplikátory podľa tier (vyšší tier = viac items)
+		tierMultiplier = 0.1 // +10% za každý tier
+
+		// Minimum garantovaných items
+		minArtifactsPerZone = 1
+		minGearPerZone      = 1
+
+		// Maximum items per zone
+		maxArtifactsPerZone = 5
+		maxGearPerZone      = 4
+	)
+
+	log.Printf("🏭 [DEBUG] Spawning items in %s zone (tier %d)", biome, tier)
+	log.Printf("🔧 [DEBUG] Template: %d artifact types, %d gear types, %d exclusive",
+		len(template.ArtifactSpawnRates), len(template.GearSpawnRates), len(template.ExclusiveArtifacts))
+
+	// Výpočet tier bonus
+	tierBonus := float64(tier) * tierMultiplier
+	adjustedArtifactRate := baseArtifactSpawnRate + tierBonus
+	adjustedGearRate := baseGearSpawnRate + tierBonus
+	adjustedExclusiveRate := exclusiveSpawnRate + tierBonus
+
+	log.Printf("📊 [DEBUG] Adjusted rates: artifacts=%.2f, gear=%.2f, exclusive=%.2f",
+		adjustedArtifactRate, adjustedGearRate, adjustedExclusiveRate)
+
+	// ✅ ARTIFACT SPAWNING s debug informáciami
+	artifactsSpawned := 0
+	artifactAttempts := 0
+
+	for artifactType, templateRate := range template.ArtifactSpawnRates {
+		// Kombinuj template rate s našou adjusted rate
+		finalRate := templateRate * adjustedArtifactRate
+		roll := rand.Float64()
+
+		log.Printf("🎲 [DEBUG] %s: roll=%.3f vs rate=%.3f (template=%.2f * adjusted=%.2f)",
+			artifactType, roll, finalRate, templateRate, adjustedArtifactRate)
+
+		if roll < finalRate && artifactsSpawned < maxArtifactsPerZone {
+			if err := h.spawnSpecificArtifact(zoneID, artifactType, biome, tier); err != nil {
+				log.Printf("❌ [ERROR] Failed to spawn artifact %s: %v", artifactType, err)
+			} else {
+				artifactsSpawned++
+				log.Printf("💎 [SUCCESS] Spawned artifact: %s (roll %.3f < %.3f)",
+					GetArtifactDisplayName(artifactType), roll, finalRate)
+			}
+		} else if roll >= finalRate {
+			log.Printf("⭕ [SKIP] %s - roll failed", artifactType)
 		} else {
-			log.Printf("💎 Artifact spawned: %s at [%.6f, %.6f]", artifact.Name, artifact.Location.Latitude, artifact.Location.Longitude)
+			log.Printf("🚫 [LIMIT] %s - max artifacts reached", artifactType)
+		}
+		artifactAttempts++
+	}
+
+	// ✅ GUARANTEED MINIMUM ARTIFACTS
+	if artifactsSpawned < minArtifactsPerZone && len(template.ArtifactSpawnRates) > 0 {
+		log.Printf("🔄 [GUARANTEE] Need %d more artifacts for minimum", minArtifactsPerZone-artifactsSpawned)
+
+		// Vyber náhodné artifact types z template
+		artifactTypes := make([]string, 0, len(template.ArtifactSpawnRates))
+		for artifactType := range template.ArtifactSpawnRates {
+			artifactTypes = append(artifactTypes, artifactType)
+		}
+
+		for artifactsSpawned < minArtifactsPerZone && len(artifactTypes) > 0 {
+			randomIndex := rand.Intn(len(artifactTypes))
+			artifactType := artifactTypes[randomIndex]
+
+			if err := h.spawnSpecificArtifact(zoneID, artifactType, biome, tier); err != nil {
+				log.Printf("❌ [GUARANTEE] Failed to spawn guaranteed %s: %v", artifactType, err)
+			} else {
+				artifactsSpawned++
+				log.Printf("💎 [GUARANTEE] Spawned guaranteed: %s", GetArtifactDisplayName(artifactType))
+			}
+
+			// Odstráň z listu aby sa neopakoval
+			artifactTypes = append(artifactTypes[:randomIndex], artifactTypes[randomIndex+1:]...)
 		}
 	}
 
-	// ✅ FIXED: Spawn gear with zone location data
-	gearCount := rand.Intn(2) + 1 // 1-2 gear items
-	for i := 0; i < gearCount; i++ {
-		gear := h.generateGear(zoneID, tier, biome, zoneCenter, zoneRadius)
-		if err := h.db.Create(&gear).Error; err != nil {
-			log.Printf("❌ Failed to create gear: %v", err)
-		} else {
-			log.Printf("⚔️ Gear spawned: %s at [%.6f, %.6f]", gear.Name, gear.Location.Latitude, gear.Location.Longitude)
+	// ✅ EXCLUSIVE ARTIFACTS s debug
+	exclusiveSpawned := 0
+	for _, exclusiveType := range template.ExclusiveArtifacts {
+		roll := rand.Float64()
+		log.Printf("🌟 [DEBUG] Exclusive %s: roll=%.3f vs rate=%.3f",
+			exclusiveType, roll, adjustedExclusiveRate)
+
+		if roll < adjustedExclusiveRate && (artifactsSpawned+exclusiveSpawned) < maxArtifactsPerZone {
+			if err := h.spawnSpecificArtifact(zoneID, exclusiveType, biome, tier); err != nil {
+				log.Printf("❌ [ERROR] Failed to spawn exclusive %s: %v", exclusiveType, err)
+			} else {
+				exclusiveSpawned++
+				log.Printf("🌟 [SUCCESS] Spawned EXCLUSIVE: %s", GetArtifactDisplayName(exclusiveType))
+			}
 		}
 	}
+
+	// ✅ GEAR SPAWNING s debug informáciami
+	gearSpawned := 0
+	for gearType, templateRate := range template.GearSpawnRates {
+		finalRate := templateRate * adjustedGearRate
+		roll := rand.Float64()
+
+		log.Printf("⚔️ [DEBUG] %s: roll=%.3f vs rate=%.3f", gearType, roll, finalRate)
+
+		if roll < finalRate && gearSpawned < maxGearPerZone {
+			if err := h.spawnSpecificGear(zoneID, gearType, biome, tier); err != nil {
+				log.Printf("❌ [ERROR] Failed to spawn gear %s: %v", gearType, err)
+			} else {
+				gearSpawned++
+				log.Printf("⚔️ [SUCCESS] Spawned gear: %s", GetGearDisplayName(gearType))
+			}
+		}
+	}
+
+	// ✅ GUARANTEED MINIMUM GEAR
+	if gearSpawned < minGearPerZone && len(template.GearSpawnRates) > 0 {
+		log.Printf("🔄 [GUARANTEE] Need %d more gear for minimum", minGearPerZone-gearSpawned)
+
+		gearTypes := make([]string, 0, len(template.GearSpawnRates))
+		for gearType := range template.GearSpawnRates {
+			gearTypes = append(gearTypes, gearType)
+		}
+
+		for gearSpawned < minGearPerZone && len(gearTypes) > 0 {
+			randomIndex := rand.Intn(len(gearTypes))
+			gearType := gearTypes[randomIndex]
+
+			if err := h.spawnSpecificGear(zoneID, gearType, biome, tier); err != nil {
+				log.Printf("❌ [GUARANTEE] Failed to spawn guaranteed %s: %v", gearType, err)
+			} else {
+				gearSpawned++
+				log.Printf("⚔️ [GUARANTEE] Spawned guaranteed: %s", GetGearDisplayName(gearType))
+			}
+
+			gearTypes = append(gearTypes[:randomIndex], gearTypes[randomIndex+1:]...)
+		}
+	}
+
+	totalArtifacts := artifactsSpawned + exclusiveSpawned
+	log.Printf("✅ [FINAL] Zone spawning complete: %d artifacts (%d regular + %d exclusive), %d gear items",
+		totalArtifacts, artifactsSpawned, exclusiveSpawned, gearSpawned)
+	log.Printf("📊 [STATS] Success rate: artifacts=%d/%d, gear=%d/%d",
+		totalArtifacts, artifactAttempts, gearSpawned, len(template.GearSpawnRates))
 }
 
-// ✅ FIXED: generateArtifact with random position in zone
-func (h *Handler) generateArtifact(zoneID uuid.UUID, tier int, biome string, zoneCenter common.Location, zoneRadius int) common.Artifact {
-	artifactTypes := []string{"ancient_coin", "crystal", "rune", "scroll", "gem", "tablet", "orb"}
-	rarities := map[int][]string{
-		0: {"common", "common", "common", "rare"},
-		1: {"common", "common", "rare", "rare"},
-		2: {"common", "rare", "rare", "epic"},
-		3: {"rare", "rare", "epic", "epic"},
-		4: {"epic", "epic", "legendary", "legendary"},
-	}
-
-	tierRarities := rarities[0] // Default
-	if r, exists := rarities[tier]; exists {
-		tierRarities = r
-	}
-
-	artifactType := artifactTypes[rand.Intn(len(artifactTypes))]
-	rarity := tierRarities[rand.Intn(len(tierRarities))]
-
-	return common.Artifact{
-		BaseModel: common.BaseModel{ID: uuid.New()},
-		ZoneID:    zoneID,
-		Name:      h.generateArtifactName(artifactType, rarity, biome),
-		Type:      artifactType,
-		Rarity:    rarity,
-		Biome:     biome,
-		Location:  h.generateRandomLocationInZone(zoneCenter, zoneRadius), // ✅ FIXED: Random position in zone
-		IsActive:  true,
-		Properties: common.JSONB{
-			"biome":      biome,
-			"spawned_at": time.Now().Unix(),
-		},
-	}
-}
-
-// ✅ FIXED: generateGear with random position in zone
-func (h *Handler) generateGear(zoneID uuid.UUID, tier int, biome string, zoneCenter common.Location, zoneRadius int) common.Gear {
-	gearTypes := []string{"sword", "shield", "armor", "boots", "helmet", "ring", "amulet"}
-
-	gearType := gearTypes[rand.Intn(len(gearTypes))]
-	level := tier + rand.Intn(3) + 1 // Tier + 1-3
-
-	return common.Gear{
-		BaseModel: common.BaseModel{ID: uuid.New()},
-		ZoneID:    zoneID,
-		Name:      h.generateGearName(gearType, level, biome),
-		Type:      gearType,
-		Level:     level,
-		Biome:     biome,
-		Location:  h.generateRandomLocationInZone(zoneCenter, zoneRadius), // ✅ FIXED: Random position in zone
-		IsActive:  true,
-		Properties: common.JSONB{
-			"biome":      biome,
-			"spawned_at": time.Now().Unix(),
-		},
-	}
-}
-
-// ✅ NEW: Generate random GPS coordinates within zone radius
+// Generate random GPS coordinates within zone radius
 func (h *Handler) generateRandomLocationInZone(center common.Location, radiusMeters int) common.Location {
 	// Random angle (0-360 degrees)
 	angle := rand.Float64() * 2 * math.Pi
@@ -955,64 +1004,6 @@ func (h *Handler) generateRandomLocationInZone(center common.Location, radiusMet
 		Longitude: center.Longitude + lngOffset,
 		Timestamp: time.Now(),
 	}
-}
-
-func (h *Handler) generateArtifactName(artifactType, rarity, biome string) string {
-	biomeAdjectives := map[string]string{
-		"forest":    "Verdant",
-		"meadow":    "Blooming",
-		"hills":     "Rolling",
-		"riverside": "Flowing",
-		"swamp":     "Murky",
-		"rocky":     "Stone",
-		"desert":    "Scorched",
-		"wasteland": "Corrupted",
-		"volcanic":  "Molten",
-		"frozen":    "Glacial",
-		"abyss":     "Void",
-	}
-
-	rarityAdjectives := map[string]string{
-		"common":    "Simple",
-		"rare":      "Ancient",
-		"epic":      "Legendary",
-		"legendary": "Divine",
-	}
-
-	biomeAdj := biomeAdjectives[biome]
-	if biomeAdj == "" {
-		biomeAdj = "Mystic"
-	}
-
-	rarityAdj := rarityAdjectives[rarity]
-	if rarityAdj == "" {
-		rarityAdj = "Ancient"
-	}
-
-	return fmt.Sprintf("%s %s %s", biomeAdj, rarityAdj, artifactType)
-}
-
-func (h *Handler) generateGearName(gearType string, level int, biome string) string {
-	biomeAdjectives := map[string]string{
-		"forest":    "Wooden",
-		"meadow":    "Leather",
-		"hills":     "Stone",
-		"riverside": "Silver",
-		"swamp":     "Rusty",
-		"rocky":     "Iron",
-		"desert":    "Bronze",
-		"wasteland": "Corrupted",
-		"volcanic":  "Obsidian",
-		"frozen":    "Ice",
-		"abyss":     "Void",
-	}
-
-	biomeAdj := biomeAdjectives[biome]
-	if biomeAdj == "" {
-		biomeAdj = "Iron"
-	}
-
-	return fmt.Sprintf("%s %s +%d", biomeAdj, gearType, level)
 }
 
 // ============================================
@@ -1050,29 +1041,5 @@ func (h *Handler) GetZoneAnalytics(c *gin.Context) {
 		"zone_analytics": stats,
 		"timestamp":      time.Now().Format(time.RFC3339),
 		"status":         "success",
-	})
-}
-
-func (h *Handler) GetAllUsers(c *gin.Context) {
-	// Get all users (Super Admin only)
-	var users []common.User
-	if err := h.db.Find(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch users",
-		})
-		return
-	}
-
-	// Remove password hashes for security
-	for i := range users {
-		users[i].PasswordHash = ""
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"users":        users,
-		"total_users":  len(users),
-		"message":      "Users retrieved successfully",
-		"timestamp":    time.Now().Format(time.RFC3339),
-		"requested_by": c.GetString("username"),
 	})
 }
