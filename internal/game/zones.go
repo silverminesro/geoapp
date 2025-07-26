@@ -391,7 +391,7 @@ func (h *Handler) countDynamicZonesInSpawnArea(lat, lng, radiusMeters float64) i
 	return count
 }
 
-// ✅ NOVÉ: Spawn s obmedzeným radius
+// ✅ AKTUALIZOVANÉ: Spawn s distance-based tier spawning
 func (h *Handler) spawnDynamicZonesInRadius(lat, lng float64, playerTier int, count int, spawnRadius float64, existingZones []common.Zone) []common.Zone {
 	var newZones []common.Zone
 
@@ -402,13 +402,16 @@ func (h *Handler) spawnDynamicZonesInRadius(lat, lng float64, playerTier int, co
 		biome := h.selectBiome(playerTier)
 		zoneTier := h.generateZoneTier(playerTier, biome)
 
-		// ✅ KĽÚČOVÁ ZMENA: Použiť spawn radius namiesto scan radius
-		zoneLat, zoneLng, positionValid := h.generateValidZonePositionInRadius(lat, lng, zoneTier, spawnRadius, existingZones)
+		// ✅ NOVÉ: Distance-based tier spawning - nižšie tier blízko, vyššie ďalej
+		tierSpawnRadius := h.calculateTierSpawnRadius(zoneTier, spawnRadius)
+
+		// ✅ KĽÚČOVÁ ZMENA: Použiť tier-specific radius namiesto full spawn radius
+		zoneLat, zoneLng, positionValid := h.generateValidZonePositionInRadius(lat, lng, zoneTier, tierSpawnRadius, existingZones)
 		if !positionValid {
 			log.Printf("⚠️ Using fallback position for zone %d (collision detection failed)", i+1)
 		}
 
-		// Random TTL between 10-24 hours
+		// Random TTL between min-max hours (konfigurovateľné)
 		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
 		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
 		ttlRange := maxTTL - minTTL
@@ -447,8 +450,11 @@ func (h *Handler) spawnDynamicZonesInRadius(lat, lng float64, playerTier int, co
 				"zone_tier":             zoneTier,
 				"player_tier":           playerTier,
 				"radius_range":          fmt.Sprintf("%d-%dm", h.getBaseRadiusForTier(zoneTier)-h.getRadiusVarianceForTier(zoneTier), h.getBaseRadiusForTier(zoneTier)+h.getRadiusVarianceForTier(zoneTier)),
-				// ✅ NOVÉ: Spawn vs scan system info
+				// ✅ NOVÉ: Distance-based spawning info
 				"spawn_radius":         spawnRadius,
+				"tier_spawn_radius":    tierSpawnRadius,
+				"distance_based_tier":  true,
+				"tier_distance_system": "close_low_far_high",
 				"scan_radius":          AreaScanRadius,
 				"spawn_vs_scan_system": true,
 			},
@@ -460,14 +466,15 @@ func (h *Handler) spawnDynamicZonesInRadius(lat, lng float64, playerTier int, co
 			existingZones = append(existingZones, zone)
 
 			distanceFromCenter := CalculateDistance(lat, lng, zoneLat, zoneLng)
-			log.Printf("🏰 Zone spawned in spawn radius: %s (Tier: %d, Distance: %.0fm, Radius: %dm)",
-				zone.Name, zoneTier, distanceFromCenter, zone.RadiusMeters)
+			log.Printf("🏰 Zone spawned: %s (Tier: %d, Distance: %.0fm/%.0fm, Biome: %s, Radius: %dm)",
+				zone.Name, zoneTier, distanceFromCenter, tierSpawnRadius, biome, zone.RadiusMeters)
 		} else {
 			log.Printf("❌ Failed to create zone: %v", err)
 		}
 	}
 
-	log.Printf("✅ Zone spawning complete: %d/%d zones created in spawn radius (%.0fm)", len(newZones), count, spawnRadius)
+	log.Printf("✅ Zone spawning complete: %d/%d zones created with distance-based tiers (spawn radius: %.0fm)",
+		len(newZones), count, spawnRadius)
 	return newZones
 }
 
@@ -496,4 +503,43 @@ func (h *Handler) generateValidZonePositionInRadius(centerLat, centerLng float64
 
 	log.Printf("❌ Failed to find valid position in spawn radius (%.0fm) after %d attempts", maxRadius, MaxPositionAttempts)
 	return centerLat, centerLng, false
+}
+
+// ✅ NOVÉ: Calculate tier-specific spawn radius (blízko = nízky tier, ďaleko = vysoký tier)
+func (h *Handler) calculateTierSpawnRadius(zoneTier int, maxSpawnRadius float64) float64 {
+	// ⚙️ KONFIGUROVATEĽNÉ NASTAVENIA - zmena týchto hodnôt ovplyvní spawn distances
+	tierDistanceRanges := map[int][2]float64{
+		// Format: tier: {min_percentage, max_percentage} z maxSpawnRadius
+		0: {0.15, 0.35}, // Tier 0: 15-35% (300-700m z 2000m) - NAJBLIŽŠIE pre začiatočníkov
+		1: {0.25, 0.50}, // Tier 1: 25-50% (500-1000m z 2000m) - BLÍZKO-STRED
+		2: {0.40, 0.70}, // Tier 2: 40-70% (800-1400m z 2000m) - STRED
+		3: {0.60, 0.85}, // Tier 3: 60-85% (1200-1700m z 2000m) - ĎALEKO
+		4: {0.75, 1.00}, // Tier 4: 75-100% (1500-2000m z 2000m) - NAJĎALEJ pre elite
+	}
+
+	// 📝 POZNÁMKA: Ak chceš zmeniť vzdialenosti:
+	// - Zmenš percentá = zóny bližšie k hráčovi
+	// - Zväčši percentá = zóny ďalej od hráča
+	// - Zmenš range = konzistentnejšie vzdialenosti
+	// - Zväčši range = väčšia variety vo vzdialenostiach
+
+	// Get range for this tier (fallback to tier 2 if unknown tier)
+	distRange, exists := tierDistanceRanges[zoneTier]
+	if !exists {
+		distRange = tierDistanceRanges[2] // Default to tier 2 range
+		log.Printf("⚠️ Unknown tier %d, using tier 2 distance range", zoneTier)
+	}
+
+	// Calculate actual distances in meters
+	minDistance := distRange[0] * maxSpawnRadius
+	maxDistance := distRange[1] * maxSpawnRadius
+
+	// Random distance within tier range
+	randomDistance := minDistance + rand.Float64()*(maxDistance-minDistance)
+
+	log.Printf("🎯 Tier %d spawn distance: %.0fm (range: %.0f-%.0fm, %.1f%%-%.1f%% of max)",
+		zoneTier, randomDistance, minDistance, maxDistance,
+		distRange[0]*100, distRange[1]*100)
+
+	return randomDistance
 }
