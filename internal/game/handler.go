@@ -58,27 +58,33 @@ func (h *Handler) ScanArea(c *gin.Context) {
 		return
 	}
 
-	// Get existing zones in area
-	existingZones := h.getExistingZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
+	// ✅ AKTUALIZOVANÉ: Rozdielne radiusy pre scan vs spawn
+	// Scan 7km radius - vidí všetky zóny
+	existingZonesInScanArea := h.getExistingZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
+
+	// Count len v spawn radius - spawnovanie len v 2km
+	currentDynamicZonesInSpawnArea := h.countDynamicZonesInSpawnArea(req.Latitude, req.Longitude, AreaSpawnRadius)
 
 	// Calculate how many new zones can be created
 	maxZones := h.calculateMaxZones(user.Tier)
-	currentDynamicZones := h.countDynamicZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
-	newZonesNeeded := maxZones - currentDynamicZones
+	newZonesNeeded := maxZones - currentDynamicZonesInSpawnArea // ✅ ZMENA: používa spawn area count
 
 	var newZones []common.Zone
 	if newZonesNeeded > 0 {
-		log.Printf("🏗️ Creating %d new zones for tier %d player", newZonesNeeded, user.Tier)
-		newZones = h.spawnDynamicZones(req.Latitude, req.Longitude, user.Tier, newZonesNeeded)
+		log.Printf("🏗️ Creating %d new zones in spawn radius (%.0fm) for tier %d player",
+			newZonesNeeded, AreaSpawnRadius, user.Tier)
+
+		// ✅ NOVÉ: Spawn len v 2km radius, ale collision check s celou 7km oblasťou
+		newZones = h.spawnDynamicZonesInRadius(req.Latitude, req.Longitude, user.Tier, newZonesNeeded, AreaSpawnRadius, existingZonesInScanArea)
 	}
 
-	// Combine all zones
-	allZones := append(existingZones, newZones...)
+	// Combine all zones v scan area (7km) - ✅ ZACHOVANÉ: vidí všetky zóny v 7km
+	allZones := append(existingZonesInScanArea, newZones...)
 
-	// Filter zones by tier
+	// Filter zones by tier - ✅ ZACHOVANÉ: tier filtering
 	visibleZones := h.filterZonesByTier(allZones, user.Tier)
 
-	// Build detailed zone info
+	// Build detailed zone info - ✅ ZACHOVANÉ: rovnaká logika
 	var zoneDetails []ZoneWithDetails
 	for _, zone := range visibleZones {
 		details := h.buildZoneDetails(zone, req.Latitude, req.Longitude, user.Tier)
@@ -93,6 +99,11 @@ func (h *Handler) ScanArea(c *gin.Context) {
 		MaxZones:          maxZones,
 		CurrentZoneCount:  len(visibleZones),
 		PlayerTier:        user.Tier,
+
+		// ✅ NOVÉ: Info o radiusoch
+		ScanRadius:       AreaScanRadius,                 // 7km - čo vidíš
+		SpawnRadius:      AreaSpawnRadius,                // 2km - kde spawnovať
+		ZonesInSpawnArea: currentDynamicZonesInSpawnArea, // Počet zón v spawn area
 	}
 
 	c.JSON(http.StatusOK, response)

@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -401,4 +402,124 @@ func (h *Handler) spawnSpecificGear(zoneID uuid.UUID, gearType, biome string, ti
 	}
 
 	return h.db.Create(&gear).Error
+}
+
+// ✅ NOVÉ: Count len dynamic zóny v spawn area
+func (h *Handler) countDynamicZonesInSpawnArea(lat, lng, radiusMeters float64) int {
+	zones := h.getExistingZonesInArea(lat, lng, radiusMeters)
+	count := 0
+	for _, zone := range zones {
+		if zone.ZoneType == "dynamic" {
+			count++
+		}
+	}
+	log.Printf("📊 Found %d dynamic zones in spawn area (%.0fm radius)", count, radiusMeters)
+	return count
+}
+
+// ✅ NOVÉ: Spawn s obmedzeným radius
+func (h *Handler) spawnDynamicZonesInRadius(lat, lng float64, playerTier int, count int, spawnRadius float64, existingZones []common.Zone) []common.Zone {
+	var newZones []common.Zone
+
+	log.Printf("🏗️ Spawning %d zones for player tier %d (spawn radius: %.0fm, collision check: %d zones)",
+		count, playerTier, spawnRadius, len(existingZones))
+
+	for i := 0; i < count; i++ {
+		biome := h.selectBiome(playerTier)
+		zoneTier := h.generateZoneTier(playerTier, biome)
+
+		// ✅ KĽÚČOVÁ ZMENA: Použiť spawn radius namiesto scan radius
+		zoneLat, zoneLng, positionValid := h.generateValidZonePositionInRadius(lat, lng, zoneTier, spawnRadius, existingZones)
+		if !positionValid {
+			log.Printf("⚠️ Using fallback position for zone %d (collision detection failed)", i+1)
+		}
+
+		// Random TTL between 10-24 hours
+		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
+		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
+		ttlRange := maxTTL - minTTL
+		randomTTL := minTTL + time.Duration(rand.Float64()*float64(ttlRange))
+		expiresAt := time.Now().Add(randomTTL)
+
+		zone := common.Zone{
+			BaseModel: common.BaseModel{ID: uuid.New()},
+			Name:      h.generateZoneName(biome),
+			Location: common.Location{
+				Latitude:  zoneLat,
+				Longitude: zoneLng,
+				Timestamp: time.Now(),
+			},
+			TierRequired: zoneTier,
+			RadiusMeters: h.calculateZoneRadius(zoneTier),
+			IsActive:     true,
+			ZoneType:     "dynamic",
+			Biome:        biome,
+			DangerLevel:  GetZoneTemplate(biome).DangerLevel,
+
+			// TTL fields
+			ExpiresAt:    &expiresAt,
+			LastActivity: time.Now(),
+			AutoCleanup:  true,
+
+			Properties: common.JSONB{
+				"spawned_by":            "scan_area",
+				"ttl_hours":             randomTTL.Hours(),
+				"biome":                 biome,
+				"danger_level":          GetZoneTemplate(biome).DangerLevel,
+				"environmental_effects": GetZoneTemplate(biome).EnvironmentalEffects,
+				"zone_template":         "biome_based",
+				"collision_detected":    !positionValid,
+				"min_distance_enforced": h.getMinZoneDistanceForZoneTier(zoneTier),
+				"zone_tier":             zoneTier,
+				"player_tier":           playerTier,
+				"radius_range":          fmt.Sprintf("%d-%dm", h.getBaseRadiusForTier(zoneTier)-h.getRadiusVarianceForTier(zoneTier), h.getBaseRadiusForTier(zoneTier)+h.getRadiusVarianceForTier(zoneTier)),
+				// ✅ NOVÉ: Spawn vs scan system info
+				"spawn_radius":         spawnRadius,
+				"scan_radius":          AreaScanRadius,
+				"spawn_vs_scan_system": true,
+			},
+		}
+
+		if err := h.db.Create(&zone).Error; err == nil {
+			h.spawnItemsInZone(zone.ID, zoneTier, zone.Biome, zone.Location, zone.RadiusMeters)
+			newZones = append(newZones, zone)
+			existingZones = append(existingZones, zone)
+
+			distanceFromCenter := CalculateDistance(lat, lng, zoneLat, zoneLng)
+			log.Printf("🏰 Zone spawned in spawn radius: %s (Tier: %d, Distance: %.0fm, Radius: %dm)",
+				zone.Name, zoneTier, distanceFromCenter, zone.RadiusMeters)
+		} else {
+			log.Printf("❌ Failed to create zone: %v", err)
+		}
+	}
+
+	log.Printf("✅ Zone spawning complete: %d/%d zones created in spawn radius (%.0fm)", len(newZones), count, spawnRadius)
+	return newZones
+}
+
+// ✅ NOVÉ: Generate position v obmedzeném radius
+func (h *Handler) generateValidZonePositionInRadius(centerLat, centerLng float64, zoneTier int, maxRadius float64, existingZones []common.Zone) (float64, float64, bool) {
+	minDistance := h.getMinZoneDistanceForZoneTier(zoneTier)
+
+	log.Printf("🎯 Generating zone position (zone tier %d, spawn radius: %.0fm, min distance: %.1fm)",
+		zoneTier, maxRadius, minDistance)
+
+	for attempt := 0; attempt < MaxPositionAttempts; attempt++ {
+		// ✅ KĽÚČOVÁ ZMENA: Obmedz na spawn radius
+		lat, lng := h.generateRandomPosition(centerLat, centerLng, maxRadius)
+
+		if h.isValidZonePositionForTier(lat, lng, zoneTier, existingZones) {
+			distanceFromCenter := CalculateDistance(centerLat, centerLng, lat, lng)
+			log.Printf("✅ Valid position found on attempt %d: [%.6f, %.6f] (%.0fm from center)",
+				attempt+1, lat, lng, distanceFromCenter)
+			return lat, lng, true
+		}
+
+		if attempt%10 == 9 {
+			log.Printf("⏳ Position attempt %d/%d failed in spawn radius - trying again...", attempt+1, MaxPositionAttempts)
+		}
+	}
+
+	log.Printf("❌ Failed to find valid position in spawn radius (%.0fm) after %d attempts", maxRadius, MaxPositionAttempts)
+	return centerLat, centerLng, false
 }

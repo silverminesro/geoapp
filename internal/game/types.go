@@ -28,6 +28,11 @@ type ScanAreaResponse struct {
 	MaxZones          int               `json:"max_zones"`
 	CurrentZoneCount  int               `json:"current_zone_count"`
 	PlayerTier        int               `json:"player_tier"`
+
+	// ✅ NOVÉ: Radius info
+	ScanRadius       float64 `json:"scan_radius"`  // 7000m
+	SpawnRadius      float64 `json:"spawn_radius"` // 2000m
+	ZonesInSpawnArea int     `json:"zones_in_spawn_area"`
 }
 
 type ZoneWithDetails struct {

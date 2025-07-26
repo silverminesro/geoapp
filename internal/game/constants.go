@@ -21,12 +21,16 @@ const (
 
 // Zone constants
 const (
-	EarthRadiusKm      = 6371.0
-	MaxScanRadius      = 100.0
-	MaxCollectRadius   = 50.0
-	AreaScanRadius     = 7000.0
+	EarthRadiusKm    = 6371.0
+	MaxScanRadius    = 100.0
+	MaxCollectRadius = 50.0
+
+	// ✅ AKTUALIZOVANÉ: Rozdiel medzi scan a spawn radius
+	AreaScanRadius  = 7000.0 // 7km - vidíš zóny v 7km
+	AreaSpawnRadius = 2000.0 // 2km - spawnovanie len v 2km (NOVÉ)
+
 	AreaScanCooldown   = 30
-	ZoneMinExpiryHours = 10
+	ZoneMinExpiryHours = 6
 	ZoneMaxExpiryHours = 24
 
 	// ✅ AKTUALIZOVANÉ: Zone tier based spacing (nie player tier)
