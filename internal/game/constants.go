@@ -31,6 +31,10 @@ const (
 	ZoneMinExpiryHours = 6
 	ZoneMaxExpiryHours = 16
 	MinZoneDistance    = 250.0 // minimálna vzdialenosť medzi zónami v metroch
+
+	//Tier 0 zóny a ich životnosť
+	Tier0MinExpiryMinutes = 90  // 1:30 hod
+	Tier0MaxExpiryMinutes = 120 // 2 hod
 )
 
 // NEW: Tier-based spawning distance ranges (in meters)
