@@ -9,6 +9,7 @@ const (
 	BiomeIndustrial  = "industrial"
 	BiomeRadioactive = "radioactive"
 	BiomeChemical    = "chemical"
+	//BiomeNight       = "night"
 )
 
 // Danger level constants
@@ -26,7 +27,7 @@ const (
 	MaxCollectRadius   = 50.0
 	AreaScanRadius     = 7000.0 // 7km - visibility radius
 	MaxSpawnRadius     = 2000.0 // 2km - maximum spawning radius (NEW)
-	AreaScanCooldown   = 30
+	AreaScanCooldown   = 1
 	ZoneMinExpiryHours = 6
 	ZoneMaxExpiryHours = 16
 	MinZoneDistance    = 250.0 // minimálna vzdialenosť medzi zónami v metroch

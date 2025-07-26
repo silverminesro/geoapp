@@ -63,6 +63,13 @@ func GetArtifactDisplayName(artifactType string) string {
 		"pure_toxin":         "Pure Concentrated Toxin",
 		"experimental_serum": "Experimental Bio-Serum",
 		"bio_weapon":         "Biological Weapon Sample",
+
+		// Night biome artifacts
+		//"moon_shard":     "Moon Shard",
+		//"night_bloom":    "Night Bloom",
+		//"shadow_essence": "Shadow Essence",
+		//"owl_feather":    "Owl Feather",
+		//"midnight_berry": "Midnight Berry",
 	}
 
 	if name, exists := displayNames[artifactType]; exists {
@@ -76,7 +83,7 @@ func GetArtifactRarity(artifactType string, tier int) string {
 	// Exclusive artifacts are always legendary
 	exclusiveArtifacts := []string{
 		"plutonium_core", "reactor_fragment", "control_rod",
-		"pure_toxin", "experimental_serum", "bio_weapon",
+		"pure_toxin", "experimental_serum", "bio_weapon", //"shadow_essence",
 	}
 	for _, exclusive := range exclusiveArtifacts {
 		if artifactType == exclusive {
@@ -87,7 +94,7 @@ func GetArtifactRarity(artifactType string, tier int) string {
 	// High-tier artifacts
 	highTierArtifacts := []string{
 		"uranium_ore", "chemical_compound", "atomic_battery",
-		"nuclear_fuel", "lab_equipment", "electronic_component",
+		"nuclear_fuel", "lab_equipment", "electronic_component", //"moon_shard",
 	}
 	for _, highTier := range highTierArtifacts {
 		if artifactType == highTier {
@@ -101,7 +108,8 @@ func GetArtifactRarity(artifactType string, tier int) string {
 	// Medium-tier artifacts
 	mediumTierArtifacts := []string{
 		"crystal_shard", "steel_ingot", "electronics",
-		"machinery_parts", "toxic_waste", "contaminated_soil",
+		"machinery_parts", "toxic_waste", "contaminated_soil", //"owl_feather",
+		//"midnight_berry",
 	}
 	for _, mediumTier := range mediumTierArtifacts {
 		if artifactType == mediumTier {
@@ -154,6 +162,7 @@ func (h *Handler) canAccessBiome(biome string, userTier int) bool {
 		BiomeIndustrial:  2,
 		BiomeRadioactive: 3,
 		BiomeChemical:    4,
+		//BiomeNight:       2, // ← pridané pre nočný biome
 	}
 
 	requiredTier, exists := biomeRequirements[biome]

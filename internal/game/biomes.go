@@ -216,6 +216,36 @@ func GetZoneTemplate(biome string) ZoneTemplate {
 				"corrosive_damage": true,
 			},
 		},
+
+		// BiomeNight: {
+		//Names: []string{
+		//"Moonlit Grove", "Shadow Valley", "Night Hunter's Rest",
+		//"Nocturnal Clearing", "Whispering Midnight Woods",
+		//},
+		//Biome:           BiomeNight,
+		//DangerLevel:     DangerMedium,
+		//MinTierRequired: 2,
+		//AllowedArtifacts: []string{
+		//"moon_shard", "night_bloom", "shadow_essence", "owl_feather", "midnight_berry",
+		//},
+		//ArtifactSpawnRates: map[string]float64{
+		//"moon_shard":     0.4,
+		//"night_bloom":    0.6,
+		//"shadow_essence": 0.2,
+		//"owl_feather":    0.5,
+		//"midnight_berry": 0.3,
+		//},
+		//GearSpawnRates: map[string]float64{
+		//"night_goggles": 0.3,
+		//"silent_boots":  0.4,
+		//},
+		//EnvironmentalEffects: map[string]interface{}{
+		//"darkness":  true,
+		//"chill":     true,
+		//"owl_hoots": true,
+		//"fireflies": true,
+		//},
+		//},
 	}
 
 	if template, exists := templates[biome]; exists {

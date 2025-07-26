@@ -173,7 +173,7 @@ func (h *Handler) getAvailableBiomes(playerTier int) []string {
 		biomes = append(biomes, BiomeMountain, BiomeUrban, BiomeWater)
 	}
 	if playerTier >= 2 {
-		biomes = append(biomes, BiomeIndustrial)
+		biomes = append(biomes, BiomeIndustrial) //BiomeNight
 	}
 	if playerTier >= 3 {
 		biomes = append(biomes, BiomeRadioactive)
