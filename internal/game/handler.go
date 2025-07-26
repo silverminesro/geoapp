@@ -98,16 +98,26 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ REFAKTOROVANÉ: spawnDynamicZones používa templates z biomes.go
+// ✅ AKTUALIZOVANÉ: spawnDynamicZones s collision detection
 func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []common.Zone {
 	var newZones []common.Zone
+
+	// Get existing zones for collision detection
+	existingZones := h.getExistingZonesInArea(lat, lng, AreaScanRadius)
+	log.Printf("🏗️ Spawning %d zones (tier %d) with %d existing zones for collision check", count, tier, len(existingZones))
 
 	for i := 0; i < count; i++ {
 		// ✅ ZMENA: použiť nový selectBiome
 		biome := h.selectBiome(tier)
 		template := GetZoneTemplate(biome)
 
-		// Random TTL between 6-24 hours
+		// ✅ NOVÉ: Generate valid position with collision detection
+		zoneLat, zoneLng, positionValid := h.generateValidZonePosition(lat, lng, tier, existingZones)
+		if !positionValid {
+			log.Printf("⚠️ Using fallback position for zone %d (collision detection failed)", i+1)
+		}
+
+		// Random TTL between 10-24 hours
 		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
 		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
 		ttlRange := maxTTL - minTTL
@@ -116,18 +126,18 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 
 		zone := common.Zone{
 			BaseModel: common.BaseModel{ID: uuid.New()},
-			Name:      h.generateZoneName(biome), // ✅ ZMENA: nová funkcia
+			Name:      h.generateZoneName(biome),
 			Location: common.Location{
-				Latitude:  lat + (rand.Float64()-0.5)*0.01,
-				Longitude: lng + (rand.Float64()-0.5)*0.01,
+				Latitude:  zoneLat, // ✅ ZMENA: Použiť validovanú pozíciu
+				Longitude: zoneLng, // ✅ ZMENA: Použiť validovanú pozíciu
 				Timestamp: time.Now(),
 			},
-			TierRequired: template.MinTierRequired, // ✅ ZMENA: z template
-			RadiusMeters: h.calculateZoneRadius(tier),
+			TierRequired: template.MinTierRequired,
+			RadiusMeters: h.calculateZoneRadius(tier), // ✅ ZMENA: Zvýšené radiusy
 			IsActive:     true,
 			ZoneType:     "dynamic",
 			Biome:        biome,
-			DangerLevel:  template.DangerLevel, // ✅ ZMENA: z template
+			DangerLevel:  template.DangerLevel,
 
 			// TTL fields
 			ExpiresAt:    &expiresAt,
@@ -139,8 +149,10 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 				"ttl_hours":             randomTTL.Hours(),
 				"biome":                 biome,
 				"danger_level":          template.DangerLevel,
-				"environmental_effects": template.EnvironmentalEffects, // ✅ NOVÉ
+				"environmental_effects": template.EnvironmentalEffects,
 				"zone_template":         "biome_based",
+				"collision_detected":    !positionValid,             // ✅ NOVÉ: Track collision info
+				"min_distance_enforced": h.getMinZoneDistance(tier), // ✅ NOVÉ: Track min distance used
 			},
 		}
 
@@ -149,13 +161,17 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 			h.spawnItemsInZone(zone.ID, tier, zone.Biome, zone.Location, zone.RadiusMeters)
 			newZones = append(newZones, zone)
 
-			log.Printf("🏰 Zone spawned: %s (Biome: %s, TTL: %.1fh, expires: %s)",
-				zone.Name, biome, randomTTL.Hours(), expiresAt.Format("15:04"))
+			// ✅ NOVÉ: Pridaj do existingZones pre ďalšie collision checks
+			existingZones = append(existingZones, zone)
+
+			log.Printf("🏰 Zone spawned: %s (Biome: %s, Radius: %dm, TTL: %.1fh, Position: [%.6f, %.6f])",
+				zone.Name, biome, zone.RadiusMeters, randomTTL.Hours(), zoneLat, zoneLng)
 		} else {
 			log.Printf("❌ Failed to create zone: %v", err)
 		}
 	}
 
+	log.Printf("✅ Zone spawning complete: %d/%d zones created successfully", len(newZones), count)
 	return newZones
 }
 

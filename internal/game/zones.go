@@ -110,21 +110,80 @@ func (h *Handler) buildZoneDetails(zone common.Zone, playerLat, playerLng float6
 	return details
 }
 
+// ✅ AKTUALIZOVANÉ: Zone radius s vyššími hodnotami
 func (h *Handler) calculateZoneRadius(tier int) int {
 	switch tier {
 	case 0:
-		return 100
+		return 200 // Free - 200m radius (zvýšené z 100m)
 	case 1:
-		return 150
+		return 250 // Basic - 250m radius (zvýšené z 150m)
 	case 2:
-		return 200
+		return 300 // Premium - 300m radius (zvýšené z 200m)
 	case 3:
-		return 250
+		return 350 // Pro - 350m radius (zvýšené z 250m)
 	case 4:
-		return 300
+		return 400 // Elite - 400m radius (zvýšené z 300m)
 	default:
-		return 100
+		return 200 // Default 200m
 	}
+}
+
+// ✅ NOVÉ: Získaj minimálnu vzdialenosť pre tier
+func (h *Handler) getMinZoneDistance(tier int) float64 {
+	switch tier {
+	case 0:
+		return MinZoneDistanceTier0 // 200m
+	case 1:
+		return MinZoneDistanceTier1 // 250m
+	case 2:
+		return MinZoneDistanceTier2 // 300m
+	case 3:
+		return MinZoneDistanceTier3 // 350m
+	case 4:
+		return MinZoneDistanceTier4 // 400m
+	default:
+		return MinZoneDistanceTier0 // Default 200m
+	}
+}
+
+// ✅ NOVÉ: Kontrola collision detection
+func (h *Handler) isValidZonePosition(lat, lng float64, tier int, existingZones []common.Zone) bool {
+	minDistance := h.getMinZoneDistance(tier)
+
+	for _, zone := range existingZones {
+		distance := CalculateDistance(lat, lng, zone.Location.Latitude, zone.Location.Longitude)
+		if distance < minDistance {
+			log.Printf("🚫 Zone collision: distance %.1fm < minimum %.1fm (tier %d)", distance, minDistance, tier)
+			return false
+		}
+	}
+	return true
+}
+
+// ✅ AKTUALIZOVANÉ: Generovanie pozície s collision detection
+func (h *Handler) generateValidZonePosition(centerLat, centerLng float64, tier int, existingZones []common.Zone) (float64, float64, bool) {
+	minDistance := h.getMinZoneDistance(tier)
+	scanRadius := AreaScanRadius / 1000.0 // Convert to km for GPS calculations
+
+	log.Printf("🎯 Generating zone position (tier %d, min distance: %.1fm)", tier, minDistance)
+
+	for attempt := 0; attempt < MaxPositionAttempts; attempt++ {
+		// Generate random position within scan radius
+		lat, lng := h.generateRandomPosition(centerLat, centerLng, scanRadius*1000) // Convert back to meters
+
+		// Check if position is valid (no collisions)
+		if h.isValidZonePosition(lat, lng, tier, existingZones) {
+			log.Printf("✅ Valid position found on attempt %d: [%.6f, %.6f]", attempt+1, lat, lng)
+			return lat, lng, true
+		}
+
+		if attempt%10 == 9 { // Log every 10 attempts
+			log.Printf("⏳ Position attempt %d/%d failed - trying again...", attempt+1, MaxPositionAttempts)
+		}
+	}
+
+	log.Printf("❌ Failed to find valid position after %d attempts (tier %d, min distance: %.1fm)", MaxPositionAttempts, tier, minDistance)
+	return centerLat, centerLng, false // Fallback to center if no valid position found
 }
 
 func (h *Handler) generateRandomPosition(centerLat, centerLng, radiusMeters float64) (float64, float64) {

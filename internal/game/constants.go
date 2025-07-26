@@ -28,4 +28,14 @@ const (
 	AreaScanCooldown   = 30
 	ZoneMinExpiryHours = 10
 	ZoneMaxExpiryHours = 24
+
+	// ✅ NOVÉ: Minimálne vzdialenosti medzi zónami
+	MinZoneDistanceTier0 = 200.0 // Free tier - 200m minimum
+	MinZoneDistanceTier1 = 250.0 // Basic tier - 250m minimum
+	MinZoneDistanceTier2 = 300.0 // Premium tier - 300m minimum
+	MinZoneDistanceTier3 = 350.0 // Pro tier - 350m minimum
+	MinZoneDistanceTier4 = 400.0 // Elite tier - 400m minimum
+
+	// Maximum attempts pre nájdenie valid pozície
+	MaxPositionAttempts = 50
 )
