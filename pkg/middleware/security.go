@@ -32,6 +32,9 @@ var blacklistedIPs = map[string]bool{
 	"185.169.4.150":  true,
 	"204.76.203.193": true,
 	"80.75.212.17":   true,
+	"207.167.67.206": true,
+	"36.41.184.119":  true,
+	"65.49.1.108":    true,
 }
 
 // 🛡️ PLAYER-FRIENDLY: Iba skutočne nebezpečné cesty
