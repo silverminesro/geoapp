@@ -172,16 +172,71 @@ func (h *Handler) getAvailableBiomes(playerTier int) []string {
 	return biomes
 }
 
+// Nahradíš pôvodnú calculateZoneTier touto verziou:
 func (h *Handler) calculateZoneTier(playerTier, biomeMinTier int) int {
-	// Start with higher of player tier or biome minimum
-	baseTier := int(math.Max(float64(playerTier), float64(biomeMinTier)))
+	r := rand.Float64()
 
-	// 70% chance for base tier, 30% for +1 tier
-	if rand.Float64() < 0.7 {
-		return baseTier
+	switch playerTier {
+	case 0:
+		// 55% na tier 0, 45% na tier 1
+		if biomeMinTier > 1 {
+			return biomeMinTier
+		}
+		if r < 0.55 {
+			return max(biomeMinTier, 0)
+		}
+		return max(biomeMinTier, 1)
+	case 1:
+		// 50% na tier 0, 45% na tier 1, 5% na tier 2
+		if r < 0.50 {
+			return max(biomeMinTier, 0)
+		} else if r < 0.95 {
+			return max(biomeMinTier, 1)
+		}
+		return max(biomeMinTier, 2)
+	case 2:
+		// 30% na tier 0, 40% na tier 1, 15% na tier 2, 15% na tier 3
+		if r < 0.30 {
+			return max(biomeMinTier, 0)
+		} else if r < 0.70 {
+			return max(biomeMinTier, 1)
+		} else if r < 0.85 {
+			return max(biomeMinTier, 2)
+		}
+		return max(biomeMinTier, 3)
+	case 3:
+		// 20% na tier 0, 20% na tier 1, 25% na tier 2, 35% na tier 3
+		if r < 0.20 {
+			return max(biomeMinTier, 0)
+		} else if r < 0.40 {
+			return max(biomeMinTier, 1)
+		} else if r < 0.65 {
+			return max(biomeMinTier, 2)
+		}
+		return max(biomeMinTier, 3)
+	case 4:
+		// 15% na tier 0, 15% na tier 1, 20% na tier 2, 25% na tier 3, 25% na tier 4
+		if r < 0.15 {
+			return max(biomeMinTier, 0)
+		} else if r < 0.30 {
+			return max(biomeMinTier, 1)
+		} else if r < 0.50 {
+			return max(biomeMinTier, 2)
+		} else if r < 0.75 {
+			return max(biomeMinTier, 3)
+		}
+		return max(biomeMinTier, 4)
+	default:
+		return biomeMinTier
 	}
-	// +1 tier but max 4
-	return int(math.Min(4, float64(baseTier+1)))
+}
+
+// Helper, pridaj hore do zones.go:
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (h *Handler) getZoneCategory(tier int) string {
