@@ -73,7 +73,7 @@ func (h *Handler) ScanArea(c *gin.Context) {
 			}
 		}
 		if tier0Count < 2 {
-			toSpawn := 2 - tier0Count
+			toSpawn := 2 - tier0Count //garantuje naspawnovanie novemu hračovi 2 zon tier 0. pre zmenu na 1 zmeň na 1 - tier0Count
 			log.Printf("✅ Guaranteeing %d tier 0 zone(s) for tier 0 player (currently %d in area)", toSpawn, tier0Count)
 			tier0Zones := h.spawnDynamicZones(req.Latitude, req.Longitude, 0, toSpawn)
 			newZones = append(newZones, tier0Zones...)
@@ -183,11 +183,19 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int)
 			continue
 		}
 
-		// Random TTL between 10-24 hours
-		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
-		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
-		ttlRange := maxTTL - minTTL
-		randomTTL := minTTL + time.Duration(rand.Float64()*float64(ttlRange))
+		// TTL podľa tieru / Tier 0 zony načítava hodnoty s constants.go a upravuju ich životnosť
+		var randomTTL time.Duration
+		if zoneTier == 0 {
+			minTTL := time.Duration(Tier0MinExpiryMinutes) * time.Minute
+			maxTTL := time.Duration(Tier0MaxExpiryMinutes) * time.Minute
+			ttlRange := maxTTL - minTTL
+			randomTTL = minTTL + time.Duration(rand.Float64()*float64(ttlRange))
+		} else {
+			minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
+			maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
+			ttlRange := maxTTL - minTTL
+			randomTTL = minTTL + time.Duration(rand.Float64()*float64(ttlRange))
+		}
 		expiresAt := time.Now().Add(randomTTL)
 
 		zone := common.Zone{
