@@ -111,6 +111,9 @@ func (h *Handler) ScanArea(c *gin.Context) {
 
 // ✅ AKTUALIZOVANÉ: spawnDynamicZones redirect na novú radius-controlled funkciu
 func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int) []common.Zone {
+	// 🚨 DEBUG: Skontroluj či sa táto funkcia volá
+	log.Printf("🚨 [DEBUG] spawnDynamicZones called with playerTier=%d, count=%d", playerTier, count)
+
 	// ✅ NOVÉ: Redirect na novú radius-controlled funkciu
 	existingZones := h.getExistingZonesInArea(lat, lng, AreaScanRadius)
 	log.Printf("🔄 [silverminesro] Redirecting to radius-controlled spawning (spawn radius: %.0fm, scan radius: %.0fm)",
@@ -118,7 +121,15 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int)
 	log.Printf("🏗️ Spawning %d zones for player tier %d with %d existing zones for collision check",
 		count, playerTier, len(existingZones))
 
-	return h.spawnDynamicZonesInRadius(lat, lng, playerTier, count, AreaSpawnRadius, existingZones)
+	// 🚨 DEBUG: Skontroluj pred volaním
+	log.Printf("🚨 [DEBUG] About to call spawnDynamicZonesInRadius with spawnRadius=%.0f", AreaSpawnRadius)
+
+	result := h.spawnDynamicZonesInRadius(lat, lng, playerTier, count, AreaSpawnRadius, existingZones)
+
+	// 🚨 DEBUG: Skontroluj po volaní
+	log.Printf("🚨 [DEBUG] spawnDynamicZonesInRadius returned %d zones", len(result))
+
+	return result
 }
 
 // GetNearbyZones - získanie zón v okolí

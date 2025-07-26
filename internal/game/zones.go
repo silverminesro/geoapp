@@ -393,6 +393,9 @@ func (h *Handler) countDynamicZonesInSpawnArea(lat, lng, radiusMeters float64) i
 
 // ✅ AKTUALIZOVANÉ: Spawn s distance-based tier spawning
 func (h *Handler) spawnDynamicZonesInRadius(lat, lng float64, playerTier int, count int, spawnRadius float64, existingZones []common.Zone) []common.Zone {
+	// 🚨 DEBUG: Hlavná spawning funkcia
+	log.Printf("🚨 [DEBUG] ENTERING spawnDynamicZonesInRadius: playerTier=%d, count=%d, spawnRadius=%.0f", playerTier, count, spawnRadius)
+
 	var newZones []common.Zone
 
 	log.Printf("🏗️ Spawning %d zones for player tier %d (spawn radius: %.0fm, collision check: %d zones)",
