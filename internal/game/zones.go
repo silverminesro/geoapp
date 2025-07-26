@@ -513,8 +513,8 @@ func (h *Handler) calculateTierSpawnRadius(zoneTier int, maxSpawnRadius float64)
 		0: {0.15, 0.35}, // Tier 0: 15-35% (300-700m z 2000m) - NAJBLIŽŠIE pre začiatočníkov
 		1: {0.25, 0.50}, // Tier 1: 25-50% (500-1000m z 2000m) - BLÍZKO-STRED
 		2: {0.40, 0.70}, // Tier 2: 40-70% (800-1400m z 2000m) - STRED
-		3: {0.60, 0.85}, // Tier 3: 60-85% (1200-1700m z 2000m) - ĎALEKO
-		4: {0.75, 1.00}, // Tier 4: 75-100% (1500-2000m z 2000m) - NAJĎALEJ pre elite
+		3: {0.60, 0.80}, // Tier 3: 60-80% (1200-1600m z 2000m) - ĎALEKO
+		4: {0.78, 1.00}, // Tier 4: 78-100% (1560-2000m z 2000m) - NAJĎALEJ pre elite
 	}
 
 	// 📝 POZNÁMKA: Ak chceš zmeniť vzdialenosti:
