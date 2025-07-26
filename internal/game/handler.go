@@ -22,7 +22,6 @@ import (
 // ============================================
 
 // ScanArea - hlavný endpoint pre hľadanie zón
-// ScanArea - hlavný endpoint pre hľadanie zón
 func (h *Handler) ScanArea(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -62,10 +61,12 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	// Get existing zones in area (7km visibility)
 	existingZones := h.getExistingZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
 
-	// ====== GARANCIA TIER 0 ZÓN PRE TIER 0 HRÁČA ======
+	// ====== GARANCIA ZÓN PRE NÍZKE TIERY ======
 	newZones := []common.Zone{}
+	zonesInSpawnRadius := h.getExistingZonesInArea(req.Latitude, req.Longitude, MaxSpawnRadius)
+
 	if user.Tier == 0 {
-		zonesInSpawnRadius := h.getExistingZonesInArea(req.Latitude, req.Longitude, MaxSpawnRadius)
+		// Garantuj 2x tier 0
 		tier0Count := 0
 		for _, z := range zonesInSpawnRadius {
 			if z.TierRequired == 0 && z.IsActive {
@@ -73,10 +74,54 @@ func (h *Handler) ScanArea(c *gin.Context) {
 			}
 		}
 		if tier0Count < 2 {
-			toSpawn := 2 - tier0Count //garantuje naspawnovanie novemu hračovi 2 zon tier 0. pre zmenu na 1 zmeň na 1 - tier0Count
+			toSpawn := 2 - tier0Count
 			log.Printf("✅ Guaranteeing %d tier 0 zone(s) for tier 0 player (currently %d in area)", toSpawn, tier0Count)
 			tier0Zones := h.spawnDynamicZones(req.Latitude, req.Longitude, 0, toSpawn)
 			newZones = append(newZones, tier0Zones...)
+		}
+	} else if user.Tier == 1 {
+		// Garantuj aspoň 1x tier 0 a 1x tier 1 zónu
+		tier0 := false
+		tier1 := false
+		for _, z := range zonesInSpawnRadius {
+			if z.TierRequired == 0 && z.IsActive {
+				tier0 = true
+			}
+			if z.TierRequired == 1 && z.IsActive {
+				tier1 = true
+			}
+		}
+		if !tier0 {
+			log.Printf("✅ Guaranteeing 1 tier 0 zone for tier 1 player")
+			tier0Zones := h.spawnDynamicZones(req.Latitude, req.Longitude, 0, 1)
+			newZones = append(newZones, tier0Zones...)
+		}
+		if !tier1 {
+			log.Printf("✅ Guaranteeing 1 tier 1 zone for tier 1 player")
+			tier1Zones := h.spawnDynamicZones(req.Latitude, req.Longitude, 1, 1)
+			newZones = append(newZones, tier1Zones...)
+		}
+	} else if user.Tier == 2 {
+		// Ak nie je v okolí žiadna tier 0/1/2, spawn 2 náhodné zóny z {0,1,2}
+		tier0, tier1, tier2 := false, false, false
+		for _, z := range zonesInSpawnRadius {
+			if z.TierRequired == 0 && z.IsActive {
+				tier0 = true
+			}
+			if z.TierRequired == 1 && z.IsActive {
+				tier1 = true
+			}
+			if z.TierRequired == 2 && z.IsActive {
+				tier2 = true
+			}
+		}
+		if !(tier0 || tier1 || tier2) {
+			log.Printf("✅ Guaranteeing 2 zones (randomly picked from tier 0,1,2) for tier 2 player")
+			for i := 0; i < 2; i++ {
+				randomTier := rand.Intn(3) // 0, 1 alebo 2
+				zones := h.spawnDynamicZones(req.Latitude, req.Longitude, randomTier, 1)
+				newZones = append(newZones, zones...)
+			}
 		}
 	}
 
