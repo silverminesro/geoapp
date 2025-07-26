@@ -58,12 +58,12 @@ func (h *Handler) ScanArea(c *gin.Context) {
 		return
 	}
 
-	// Get existing zones in area
+	// Get existing zones in area (7km visibility)
 	existingZones := h.getExistingZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
 
-	// Calculate how many new zones can be created
+	// Calculate how many new zones can be created (only count zones in spawn radius - 2km)
 	maxZones := h.calculateMaxZones(user.Tier)
-	currentDynamicZones := h.countDynamicZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
+	currentDynamicZones := h.countDynamicZonesInArea(req.Latitude, req.Longitude, MaxSpawnRadius)
 	newZonesNeeded := maxZones - currentDynamicZones
 
 	var newZones []common.Zone
@@ -98,16 +98,29 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ REFAKTOROVANÉ: spawnDynamicZones používa templates z biomes.go
-func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []common.Zone {
+// ✅ UPDATED: spawnDynamicZones with tier-based distance spawning
+func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int) []common.Zone {
 	var newZones []common.Zone
 
 	for i := 0; i < count; i++ {
-		// ✅ ZMENA: použiť nový selectBiome
-		biome := h.selectBiome(tier)
+		// ✅ Select biome based on player tier
+		biome := h.selectBiome(playerTier)
 		template := GetZoneTemplate(biome)
 
-		// Random TTL between 6-24 hours
+		// ✅ NEW: Calculate zone tier (can be different from player tier)
+		zoneTier := h.calculateZoneTier(playerTier, template.MinTierRequired)
+
+		// ✅ NEW: Generate position based on zone tier
+		zoneLat, zoneLng := h.generateTierBasedPosition(lat, lng, zoneTier)
+
+		// Verify the position is within max spawn radius
+		spawnDistance := CalculateDistance(lat, lng, zoneLat, zoneLng)
+		if spawnDistance > MaxSpawnRadius {
+			log.Printf("⚠️ Zone would spawn too far (%.0fm > %.0fm), skipping", spawnDistance, MaxSpawnRadius)
+			continue
+		}
+
+		// Random TTL between 10-24 hours
 		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
 		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
 		ttlRange := maxTTL - minTTL
@@ -116,18 +129,18 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 
 		zone := common.Zone{
 			BaseModel: common.BaseModel{ID: uuid.New()},
-			Name:      h.generateZoneName(biome), // ✅ ZMENA: nová funkcia
+			Name:      h.generateZoneName(biome),
 			Location: common.Location{
-				Latitude:  lat + (rand.Float64()-0.5)*0.01,
-				Longitude: lng + (rand.Float64()-0.5)*0.01,
+				Latitude:  zoneLat, // ✅ NEW: tier-based position
+				Longitude: zoneLng, // ✅ NEW: tier-based position
 				Timestamp: time.Now(),
 			},
-			TierRequired: template.MinTierRequired, // ✅ ZMENA: z template
-			RadiusMeters: h.calculateZoneRadius(tier),
+			TierRequired: zoneTier,                        // ✅ NEW: calculated zone tier
+			RadiusMeters: h.calculateZoneRadius(zoneTier), // ✅ NEW: dynamic radius
 			IsActive:     true,
 			ZoneType:     "dynamic",
 			Biome:        biome,
-			DangerLevel:  template.DangerLevel, // ✅ ZMENA: z template
+			DangerLevel:  template.DangerLevel,
 
 			// TTL fields
 			ExpiresAt:    &expiresAt,
@@ -139,18 +152,21 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 				"ttl_hours":             randomTTL.Hours(),
 				"biome":                 biome,
 				"danger_level":          template.DangerLevel,
-				"environmental_effects": template.EnvironmentalEffects, // ✅ NOVÉ
+				"environmental_effects": template.EnvironmentalEffects,
 				"zone_template":         "biome_based",
+				"spawn_distance":        spawnDistance, // ✅ NEW: debug info
+				"zone_tier":             zoneTier,      // ✅ NEW: zone tier info
+				"player_tier":           playerTier,    // ✅ NEW: spawner tier info
 			},
 		}
 
 		if err := h.db.Create(&zone).Error; err == nil {
-			// ✅ ZMENA: nová spawnItemsInZone funkcia
-			h.spawnItemsInZone(zone.ID, tier, zone.Biome, zone.Location, zone.RadiusMeters)
+			// ✅ Spawn items in zone
+			h.spawnItemsInZone(zone.ID, zoneTier, zone.Biome, zone.Location, zone.RadiusMeters)
 			newZones = append(newZones, zone)
 
-			log.Printf("🏰 Zone spawned: %s (Biome: %s, TTL: %.1fh, expires: %s)",
-				zone.Name, biome, randomTTL.Hours(), expiresAt.Format("15:04"))
+			log.Printf("🏰 Zone spawned: %s (Tier: %d, Biome: %s, Distance: %.0fm, Radius: %dm, TTL: %.1fh)",
+				zone.Name, zoneTier, biome, spawnDistance, zone.RadiusMeters, randomTTL.Hours())
 		} else {
 			log.Printf("❌ Failed to create zone: %v", err)
 		}
@@ -353,11 +369,6 @@ func (h *Handler) EnterZone(c *gin.Context) {
 		"ttl_status":           zone.TTLStatus(),
 		"expires_in_seconds":   int64(zone.TimeUntilExpiry().Seconds()),
 	})
-}
-
-// Helper function to update zone activity
-func (h *Handler) updateZoneActivity(zoneID uuid.UUID) {
-	h.db.Model(&common.Zone{}).Where("id = ?", zoneID).Update("last_activity", time.Now())
 }
 
 // ExitZone - jednoduchá implementácia
@@ -681,6 +692,11 @@ func (h *Handler) CollectItem(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// Helper function to update zone activity
+func (h *Handler) updateZoneActivity(zoneID uuid.UUID) {
+	h.db.Model(&common.Zone{}).Where("id = ?", zoneID).Update("last_activity", time.Now())
+}
+
 // Check and cleanup empty zone
 func (h *Handler) checkAndCleanupEmptyZone(zoneID uuid.UUID) {
 	// Wait a bit to allow for multiple rapid collections
@@ -697,122 +713,10 @@ func (h *Handler) checkAndCleanupEmptyZone(zoneID uuid.UUID) {
 }
 
 // ============================================
-// STUB ENDPOINTS (TO BE IMPLEMENTED)
+// ✅ HELPER FUNCTIONS - TIER-BASED SPAWNING
 // ============================================
 
-func (h *Handler) GetAvailableArtifacts(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get available artifacts not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetAvailableGear(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get available gear not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) UseItem(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Use item not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetLeaderboard(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get leaderboard not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetGameStats(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get game stats not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetZoneStats(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get zone stats not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) CreateEventZone(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Create event zone not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) UpdateZone(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Update zone not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) DeleteZone(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Delete zone not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) SpawnArtifact(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Spawn artifact not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) SpawnGear(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Spawn gear not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetItemAnalytics(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":  "Get item analytics not implemented yet",
-		"status": "planned",
-	})
-}
-
-func (h *Handler) GetAllUsers(c *gin.Context) {
-	// Get all users (Super Admin only)
-	var users []common.User
-	if err := h.db.Find(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch users",
-		})
-		return
-	}
-
-	// Remove password hashes for security
-	for i := range users {
-		users[i].PasswordHash = ""
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"users":        users,
-		"total_users":  len(users),
-		"message":      "Users retrieved successfully",
-		"timestamp":    time.Now().Format(time.RFC3339),
-		"requested_by": c.GetString("username"),
-	})
-}
-
-// ============================================
-// ✅ REFAKTOROVANÉ HELPER FUNCTIONS
-// ============================================
-
-// ✅ NOVÉ: selectBiome používa getAvailableBiomes z zones.go
+// ✅ selectBiome používa getAvailableBiomes z zones.go
 func (h *Handler) selectBiome(tier int) string {
 	availableBiomes := h.getAvailableBiomes(tier)
 	if len(availableBiomes) == 0 {
@@ -821,13 +725,56 @@ func (h *Handler) selectBiome(tier int) string {
 	return availableBiomes[rand.Intn(len(availableBiomes))]
 }
 
-// ✅ NOVÉ: generateZoneName používa GetZoneTemplate z biomes.go
+// ✅ generateZoneName používa GetZoneTemplate z biomes.go
 func (h *Handler) generateZoneName(biome string) string {
 	template := GetZoneTemplate(biome)
 	if len(template.Names) == 0 {
 		return fmt.Sprintf("Unknown %s Zone", biome)
 	}
 	return template.Names[rand.Intn(len(template.Names))]
+}
+
+// ✅ NEW: Generate position based on tier distance ranges
+func (h *Handler) generateTierBasedPosition(centerLat, centerLng float64, zoneTier int) (float64, float64) {
+	minDistance, maxDistance := h.getTierSpawnDistance(zoneTier)
+
+	// Random angle (0-360 degrees)
+	angle := rand.Float64() * 2 * math.Pi
+
+	// Random distance within tier range
+	distance := minDistance + rand.Float64()*(maxDistance-minDistance)
+
+	// Convert to GPS coordinates using Haversine
+	earthRadius := 6371000.0 // meters
+
+	latOffset := (distance * math.Cos(angle)) / earthRadius * (180 / math.Pi)
+	lngOffset := (distance * math.Sin(angle)) / earthRadius * (180 / math.Pi) / math.Cos(centerLat*math.Pi/180)
+
+	newLat := centerLat + latOffset
+	newLng := centerLng + lngOffset
+
+	log.Printf("🎯 [TIER %d] Spawning zone at distance %.0fm (range: %.0f-%.0fm) angle: %.1f°",
+		zoneTier, distance, minDistance, maxDistance, angle*180/math.Pi)
+
+	return newLat, newLng
+}
+
+// ✅ NEW: Tier-based distance calculation for zone spawning
+func (h *Handler) getTierSpawnDistance(zoneTier int) (float64, float64) {
+	switch zoneTier {
+	case 0:
+		return Tier0MinDistance, Tier0MaxDistance
+	case 1:
+		return Tier1MinDistance, Tier1MaxDistance
+	case 2:
+		return Tier2MinDistance, Tier2MaxDistance
+	case 3:
+		return Tier3MinDistance, Tier3MaxDistance
+	case 4:
+		return Tier4MinDistance, Tier4MaxDistance
+	default:
+		return Tier0MinDistance, Tier0MaxDistance
+	}
 }
 
 // ✅ ENHANCED: spawnItemsInZone s konfigurovateľnými spawn rates
@@ -1041,5 +988,117 @@ func (h *Handler) GetZoneAnalytics(c *gin.Context) {
 		"zone_analytics": stats,
 		"timestamp":      time.Now().Format(time.RFC3339),
 		"status":         "success",
+	})
+}
+
+// ============================================
+// STUB ENDPOINTS (TO BE IMPLEMENTED)
+// ============================================
+
+func (h *Handler) GetAvailableArtifacts(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get available artifacts not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetAvailableGear(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get available gear not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) UseItem(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Use item not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetLeaderboard(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get leaderboard not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetGameStats(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get game stats not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetZoneStats(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get zone stats not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) CreateEventZone(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Create event zone not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) UpdateZone(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Update zone not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) DeleteZone(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Delete zone not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) SpawnArtifact(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Spawn artifact not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) SpawnGear(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Spawn gear not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetItemAnalytics(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":  "Get item analytics not implemented yet",
+		"status": "planned",
+	})
+}
+
+func (h *Handler) GetAllUsers(c *gin.Context) {
+	// Get all users (Super Admin only)
+	var users []common.User
+	if err := h.db.Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch users",
+		})
+		return
+	}
+
+	// Remove password hashes for security
+	for i := range users {
+		users[i].PasswordHash = ""
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users":        users,
+		"total_users":  len(users),
+		"message":      "Users retrieved successfully",
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"requested_by": c.GetString("username"),
 	})
 }

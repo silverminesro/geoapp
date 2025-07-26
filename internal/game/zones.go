@@ -110,21 +110,35 @@ func (h *Handler) buildZoneDetails(zone common.Zone, playerLat, playerLng float6
 	return details
 }
 
-func (h *Handler) calculateZoneRadius(tier int) int {
-	switch tier {
+// ✅ NEW: Tier-based zone radius calculation with random ranges
+func (h *Handler) getTierZoneRadius(zoneTier int) (float64, float64) {
+	switch zoneTier {
 	case 0:
-		return 100
+		return Tier0MinRadius, Tier0MaxRadius
 	case 1:
-		return 150
+		return Tier1MinRadius, Tier1MaxRadius
 	case 2:
-		return 200
+		return Tier2MinRadius, Tier2MaxRadius
 	case 3:
-		return 250
+		return Tier3MinRadius, Tier3MaxRadius
 	case 4:
-		return 300
+		return Tier4MinRadius, Tier4MaxRadius
 	default:
-		return 100
+		return Tier0MinRadius, Tier0MaxRadius
 	}
+}
+
+// ✅ UPDATED: calculateZoneRadius now uses random ranges instead of fixed values
+func (h *Handler) calculateZoneRadius(tier int) int {
+	minRadius, maxRadius := h.getTierZoneRadius(tier)
+
+	// Random radius within tier range
+	randomRadius := minRadius + rand.Float64()*(maxRadius-minRadius)
+
+	log.Printf("🏗️ [TIER %d] Zone radius: %.0fm (range: %.0f-%.0fm)",
+		tier, randomRadius, minRadius, maxRadius)
+
+	return int(randomRadius)
 }
 
 func (h *Handler) generateRandomPosition(centerLat, centerLng, radiusMeters float64) (float64, float64) {
