@@ -105,10 +105,29 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int)
 	// Získaj všetky existujúce zóny v maximálnom okruhu spawnu (2km)
 	existingZones := h.getExistingZonesInArea(lat, lng, MaxSpawnRadius)
 
+	// Špeciálne správanie pre tier 0 hráča
+	var forcedTiers []int
+	if playerTier == 0 && count > 0 {
+		forcedTiers = append(forcedTiers, 0)
+		if count > 1 {
+			forcedTiers = append(forcedTiers, 0)
+		}
+	}
+
 	for i := 0; i < count; i++ {
-		biome := h.selectBiome(playerTier)
-		template := GetZoneTemplate(biome)
-		zoneTier := h.calculateZoneTier(playerTier, template.MinTierRequired)
+		var zoneTier int
+		var biome string
+		var template ZoneTemplate
+
+		if i < len(forcedTiers) {
+			zoneTier = forcedTiers[i]
+			biome = h.selectBiome(zoneTier)
+			template = GetZoneTemplate(biome)
+		} else {
+			biome = h.selectBiome(playerTier)
+			template = GetZoneTemplate(biome)
+			zoneTier = h.calculateZoneTier(playerTier, template.MinTierRequired)
+		}
 
 		var zoneLat, zoneLng float64
 		valid := false
@@ -156,8 +175,8 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int)
 			BaseModel: common.BaseModel{ID: uuid.New()},
 			Name:      h.generateZoneName(biome),
 			Location: common.Location{
-				Latitude:  zoneLat, // ✅ tier-based position
-				Longitude: zoneLng, // ✅ tier-based position
+				Latitude:  zoneLat,
+				Longitude: zoneLng,
 				Timestamp: time.Now(),
 			},
 			TierRequired: zoneTier,
