@@ -33,14 +33,27 @@ func (h *Handler) getExistingZonesInArea(lat, lng, radiusMeters float64) []commo
 	return filteredZones
 }
 
+// Filter zones by tier based on user tier
+// This function ensures that users only see zones they are allowed to enter based on their tier
 func (h *Handler) filterZonesByTier(zones []common.Zone, userTier int) []common.Zone {
+	var maxVisibleTier int
+	switch userTier {
+	case 0:
+		maxVisibleTier = 2
+	case 1, 2:
+		maxVisibleTier = 3
+	case 3, 4:
+		maxVisibleTier = 4
+	default:
+		maxVisibleTier = userTier
+	}
 	var visibleZones []common.Zone
 	for _, zone := range zones {
-		if zone.TierRequired <= userTier {
+		if zone.TierRequired <= maxVisibleTier {
 			visibleZones = append(visibleZones, zone)
 		}
 	}
-	log.Printf("🔍 Filtered zones: %d visible out of %d total (user tier: %d)", len(visibleZones), len(zones), userTier)
+	log.Printf("🔍 Filtered zones: %d visible out of %d total (user tier: %d, max visible: %d)", len(visibleZones), len(zones), userTier, maxVisibleTier)
 	return visibleZones
 }
 
