@@ -22,6 +22,7 @@ import (
 // ============================================
 
 // ScanArea - hlavný endpoint pre hľadanie zón
+// ScanArea - hlavný endpoint pre hľadanie zón
 func (h *Handler) ScanArea(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -61,15 +62,33 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	// Get existing zones in area (7km visibility)
 	existingZones := h.getExistingZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
 
+	// ====== GARANCIA TIER 0 ZÓN PRE TIER 0 HRÁČA ======
+	newZones := []common.Zone{}
+	if user.Tier == 0 {
+		zonesInSpawnRadius := h.getExistingZonesInArea(req.Latitude, req.Longitude, MaxSpawnRadius)
+		tier0Count := 0
+		for _, z := range zonesInSpawnRadius {
+			if z.TierRequired == 0 && z.IsActive {
+				tier0Count++
+			}
+		}
+		if tier0Count < 2 {
+			toSpawn := 2 - tier0Count
+			log.Printf("✅ Guaranteeing %d tier 0 zone(s) for tier 0 player (currently %d in area)", toSpawn, tier0Count)
+			tier0Zones := h.spawnDynamicZones(req.Latitude, req.Longitude, 0, toSpawn)
+			newZones = append(newZones, tier0Zones...)
+		}
+	}
+
 	// Calculate how many new zones can be created (only count zones in spawn radius - 2km)
 	maxZones := h.calculateMaxZones(user.Tier)
 	currentDynamicZones := h.countDynamicZonesInArea(req.Latitude, req.Longitude, MaxSpawnRadius)
 	newZonesNeeded := maxZones - currentDynamicZones
 
-	var newZones []common.Zone
 	if newZonesNeeded > 0 {
 		log.Printf("🏗️ Creating %d new zones for tier %d player", newZonesNeeded, user.Tier)
-		newZones = h.spawnDynamicZones(req.Latitude, req.Longitude, user.Tier, newZonesNeeded)
+		additionalZones := h.spawnDynamicZones(req.Latitude, req.Longitude, user.Tier, newZonesNeeded)
+		newZones = append(newZones, additionalZones...)
 	}
 
 	// Combine all zones
