@@ -220,46 +220,58 @@ func (h *Handler) generateValidZonePositionForTier(centerLat, centerLng float64,
 	return centerLat, centerLng, false // Fallback to center if no valid position found
 }
 
-// ✅ NOVÉ: Generuj zone tier na základe player tier a biome
+// ✅ AKTUALIZOVANÉ: Univerzálna distribúcia pre všetkých hráčov
 func (h *Handler) generateZoneTier(playerTier int, biome string) int {
 	template := GetZoneTemplate(biome)
 	minTierForBiome := template.MinTierRequired
 
-	// Zone tier môže byť od min tier pre biome až po player tier (alebo +1)
-	minZoneTier := minTierForBiome
-	maxZoneTier := int(math.Min(4, float64(playerTier+1))) // Max tier 4, môže byť +1 od player
-
-	if maxZoneTier < minZoneTier {
-		maxZoneTier = minZoneTier
+	// ✅ UNIVERZÁLNA DISTRIBÚCIA - rovnaká pre všetkých hráčov
+	// Zabezpečí dostupnosť zón pre všetky tier úrovne
+	weights := map[int]int{
+		0: 35, // 35% tier 0 zóny - základný content
+		1: 30, // 30% tier 1 zóny - basic content
+		2: 20, // 20% tier 2 zóny - intermediate content
+		3: 10, // 10% tier 3 zóny - advanced content
+		4: 5,  // 5% tier 4 zóny - elite content
 	}
 
-	// 60% šanca na player tier, 30% na nižší, 10% na vyšší
-	roll := rand.Float64()
-
-	var zoneTier int
-	if roll < 0.6 {
-		// Player tier level
-		zoneTier = playerTier
-	} else if roll < 0.9 {
-		// Lower tier (ale nie menej ako min pre biome)
-		zoneTier = int(math.Max(float64(minZoneTier), float64(playerTier-1)))
-	} else {
-		// Higher tier (ale nie viac ako max)
-		zoneTier = int(math.Min(float64(maxZoneTier), float64(playerTier+1)))
+	// Filter len dostupné pre biome a player tier
+	availableWeights := map[int]int{}
+	for tier, weight := range weights {
+		// Zóna sa môže spawnovať ak:
+		// 1. Spĺňa biome requirements
+		// 2. Nepresahuje player tier o viac ako +1
+		if tier >= minTierForBiome && tier <= playerTier+1 {
+			availableWeights[tier] = weight
+		}
 	}
 
-	// Ensure v rámci limits
-	if zoneTier < minZoneTier {
-		zoneTier = minZoneTier
-	}
-	if zoneTier > 4 {
-		zoneTier = 4
+	// Special case: Ak hráč nemôže spawnovať nič
+	if len(availableWeights) == 0 {
+		log.Printf("⚠️ No available zones for player tier %d in biome %s, using min tier %d",
+			playerTier, biome, minTierForBiome)
+		return minTierForBiome
 	}
 
-	log.Printf("🎲 Generated zone tier %d for player tier %d, biome %s (min: %d, max: %d)",
-		zoneTier, playerTier, biome, minZoneTier, maxZoneTier)
+	// Weighted random selection
+	totalWeight := 0
+	for _, weight := range availableWeights {
+		totalWeight += weight
+	}
 
-	return zoneTier
+	roll := rand.Intn(totalWeight)
+	current := 0
+
+	for tier, weight := range availableWeights {
+		current += weight
+		if roll < current {
+			log.Printf("🎲 Zone tier %d spawned by player tier %d in %s biome (universal distribution)",
+				tier, playerTier, biome)
+			return tier
+		}
+	}
+
+	return minTierForBiome // Fallback
 }
 
 func (h *Handler) generateRandomPosition(centerLat, centerLng, radiusMeters float64) (float64, float64) {
