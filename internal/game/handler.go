@@ -109,87 +109,16 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ AKTUALIZOVANÉ: spawnDynamicZones s tier-based zone sizing
+// ✅ AKTUALIZOVANÉ: spawnDynamicZones redirect na novú radius-controlled funkciu
 func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int) []common.Zone {
-	var newZones []common.Zone
-
-	// Get existing zones for collision detection
+	// ✅ NOVÉ: Redirect na novú radius-controlled funkciu
 	existingZones := h.getExistingZonesInArea(lat, lng, AreaScanRadius)
-	log.Printf("🏗️ Spawning %d zones for player tier %d with %d existing zones for collision check", count, playerTier, len(existingZones))
+	log.Printf("🔄 [silverminesro] Redirecting to radius-controlled spawning (spawn radius: %.0fm, scan radius: %.0fm)",
+		AreaSpawnRadius, AreaScanRadius)
+	log.Printf("🏗️ Spawning %d zones for player tier %d with %d existing zones for collision check",
+		count, playerTier, len(existingZones))
 
-	for i := 0; i < count; i++ {
-		// ✅ ZMENA: použiť nový selectBiome
-		biome := h.selectBiome(playerTier)
-		template := GetZoneTemplate(biome)
-
-		// ✅ NOVÉ: Generuj zone tier (nezávisle od player tier)
-		zoneTier := h.generateZoneTier(playerTier, biome)
-
-		// ✅ NOVÉ: Generate valid position s zone tier
-		zoneLat, zoneLng, positionValid := h.generateValidZonePositionForTier(lat, lng, zoneTier, existingZones)
-		if !positionValid {
-			log.Printf("⚠️ Using fallback position for zone %d (collision detection failed)", i+1)
-		}
-
-		// Random TTL between 10-24 hours
-		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
-		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
-		ttlRange := maxTTL - minTTL
-		randomTTL := minTTL + time.Duration(rand.Float64()*float64(ttlRange))
-		expiresAt := time.Now().Add(randomTTL)
-
-		zone := common.Zone{
-			BaseModel: common.BaseModel{ID: uuid.New()},
-			Name:      h.generateZoneName(biome),
-			Location: common.Location{
-				Latitude:  zoneLat,
-				Longitude: zoneLng,
-				Timestamp: time.Now(),
-			},
-			TierRequired: zoneTier,                        // ✅ ZMENA: Použiť zone tier namiesto template
-			RadiusMeters: h.calculateZoneRadius(zoneTier), // ✅ ZMENA: Zone tier pre radius
-			IsActive:     true,
-			ZoneType:     "dynamic",
-			Biome:        biome,
-			DangerLevel:  template.DangerLevel,
-
-			// TTL fields
-			ExpiresAt:    &expiresAt,
-			LastActivity: time.Now(),
-			AutoCleanup:  true,
-
-			Properties: common.JSONB{
-				"spawned_by":            "scan_area",
-				"ttl_hours":             randomTTL.Hours(),
-				"biome":                 biome,
-				"danger_level":          template.DangerLevel,
-				"environmental_effects": template.EnvironmentalEffects,
-				"zone_template":         "biome_based",
-				"collision_detected":    !positionValid,
-				"min_distance_enforced": h.getMinZoneDistanceForZoneTier(zoneTier), // ✅ ZMENA: Zone tier
-				"zone_tier":             zoneTier,                                  // ✅ NOVÉ: Track zone tier
-				"player_tier":           playerTier,                                // ✅ NOVÉ: Track spawning player tier
-				"radius_range":          fmt.Sprintf("%d-%dm", h.getBaseRadiusForTier(zoneTier)-h.getRadiusVarianceForTier(zoneTier), h.getBaseRadiusForTier(zoneTier)+h.getRadiusVarianceForTier(zoneTier)),
-			},
-		}
-
-		if err := h.db.Create(&zone).Error; err == nil {
-			// ✅ ZMENA: použiť zone tier pre item spawning
-			h.spawnItemsInZone(zone.ID, zoneTier, zone.Biome, zone.Location, zone.RadiusMeters)
-			newZones = append(newZones, zone)
-
-			// ✅ NOVÉ: Pridaj do existingZones pre ďalšie collision checks
-			existingZones = append(existingZones, zone)
-
-			log.Printf("🏰 Zone spawned: %s (Tier: %d, Biome: %s, Radius: %dm, TTL: %.1fh, Position: [%.6f, %.6f])",
-				zone.Name, zoneTier, biome, zone.RadiusMeters, randomTTL.Hours(), zoneLat, zoneLng)
-		} else {
-			log.Printf("❌ Failed to create zone: %v", err)
-		}
-	}
-
-	log.Printf("✅ Zone spawning complete: %d/%d zones created successfully for player tier %d", len(newZones), count, playerTier)
-	return newZones
+	return h.spawnDynamicZonesInRadius(lat, lng, playerTier, count, AreaSpawnRadius, existingZones)
 }
 
 // GetNearbyZones - získanie zón v okolí

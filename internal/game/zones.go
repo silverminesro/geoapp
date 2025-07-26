@@ -195,32 +195,6 @@ func (h *Handler) isValidZonePositionForTier(lat, lng float64, zoneTier int, exi
 	return true
 }
 
-// ✅ AKTUALIZOVANÉ: Generate position s zone tier
-func (h *Handler) generateValidZonePositionForTier(centerLat, centerLng float64, zoneTier int, existingZones []common.Zone) (float64, float64, bool) {
-	minDistance := h.getMinZoneDistanceForZoneTier(zoneTier)
-	scanRadius := AreaScanRadius / 1000.0 // Convert to km for GPS calculations
-
-	log.Printf("🎯 Generating zone position (zone tier %d, min distance: %.1fm)", zoneTier, minDistance)
-
-	for attempt := 0; attempt < MaxPositionAttempts; attempt++ {
-		// Generate random position within scan radius
-		lat, lng := h.generateRandomPosition(centerLat, centerLng, scanRadius*1000) // Convert back to meters
-
-		// Check if position is valid (no collisions)
-		if h.isValidZonePositionForTier(lat, lng, zoneTier, existingZones) {
-			log.Printf("✅ Valid position found on attempt %d: [%.6f, %.6f] (zone tier %d)", attempt+1, lat, lng, zoneTier)
-			return lat, lng, true
-		}
-
-		if attempt%10 == 9 { // Log every 10 attempts
-			log.Printf("⏳ Position attempt %d/%d failed for zone tier %d - trying again...", attempt+1, MaxPositionAttempts, zoneTier)
-		}
-	}
-
-	log.Printf("❌ Failed to find valid position after %d attempts (zone tier %d, min distance: %.1fm)", MaxPositionAttempts, zoneTier, minDistance)
-	return centerLat, centerLng, false // Fallback to center if no valid position found
-}
-
 // ✅ AKTUALIZOVANÉ: Univerzálna distribúcia pre všetkých hráčov
 func (h *Handler) generateZoneTier(playerTier int, biome string) int {
 	template := GetZoneTemplate(biome)
