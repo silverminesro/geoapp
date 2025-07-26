@@ -29,7 +29,7 @@ const (
 	AreaScanCooldown   = 30
 	ZoneMinExpiryHours = 6
 	ZoneMaxExpiryHours = 16
-	MinZoneDistance    = 200.0 // minimálna vzdialenosť medzi zónami v metroch
+	MinZoneDistance    = 250.0 // minimálna vzdialenosť medzi zónami v metroch
 )
 
 // NEW: Tier-based spawning distance ranges (in meters)
