@@ -98,22 +98,47 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ UPDATED: spawnDynamicZones with tier-based distance spawning
+// ✅ UPDATED: spawnDynamicZones with tier-based distance spawning & minimal distance between zones
 func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int) []common.Zone {
 	var newZones []common.Zone
 
+	// Získaj všetky existujúce zóny v maximálnom okruhu spawnu (2km)
+	existingZones := h.getExistingZonesInArea(lat, lng, MaxSpawnRadius)
+
 	for i := 0; i < count; i++ {
-		// ✅ Select biome based on player tier
 		biome := h.selectBiome(playerTier)
 		template := GetZoneTemplate(biome)
-
-		// ✅ NEW: Calculate zone tier (can be different from player tier)
 		zoneTier := h.calculateZoneTier(playerTier, template.MinTierRequired)
 
-		// ✅ NEW: Generate position based on zone tier
-		zoneLat, zoneLng := h.generateTierBasedPosition(lat, lng, zoneTier)
+		var zoneLat, zoneLng float64
+		valid := false
+		maxTries := 10
 
-		// Verify the position is within max spawn radius
+		for try := 0; try < maxTries; try++ {
+			zoneLat, zoneLng = h.generateTierBasedPosition(lat, lng, zoneTier)
+			tooClose := false
+
+			// Kontrola vzdialenosti voči už existujúcim aj novo spawnutým zónam
+			for _, z := range append(existingZones, newZones...) {
+				distance := CalculateDistance(zoneLat, zoneLng, z.Location.Latitude, z.Location.Longitude)
+				if distance < MinZoneDistance {
+					tooClose = true
+					break
+				}
+			}
+
+			if !tooClose {
+				valid = true
+				break
+			}
+		}
+
+		if !valid {
+			log.Printf("⚠️ Could not find free position for zone after %d tries, skipping spawn.", maxTries)
+			continue
+		}
+
+		// Over, či pozícia je v rámci max spawn radius
 		spawnDistance := CalculateDistance(lat, lng, zoneLat, zoneLng)
 		if spawnDistance > MaxSpawnRadius {
 			log.Printf("⚠️ Zone would spawn too far (%.0fm > %.0fm), skipping", spawnDistance, MaxSpawnRadius)
@@ -131,12 +156,12 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int)
 			BaseModel: common.BaseModel{ID: uuid.New()},
 			Name:      h.generateZoneName(biome),
 			Location: common.Location{
-				Latitude:  zoneLat, // ✅ NEW: tier-based position
-				Longitude: zoneLng, // ✅ NEW: tier-based position
+				Latitude:  zoneLat, // ✅ tier-based position
+				Longitude: zoneLng, // ✅ tier-based position
 				Timestamp: time.Now(),
 			},
-			TierRequired: zoneTier,                        // ✅ NEW: calculated zone tier
-			RadiusMeters: h.calculateZoneRadius(zoneTier), // ✅ NEW: dynamic radius
+			TierRequired: zoneTier,
+			RadiusMeters: h.calculateZoneRadius(zoneTier),
 			IsActive:     true,
 			ZoneType:     "dynamic",
 			Biome:        biome,
@@ -154,14 +179,13 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int)
 				"danger_level":          template.DangerLevel,
 				"environmental_effects": template.EnvironmentalEffects,
 				"zone_template":         "biome_based",
-				"spawn_distance":        spawnDistance, // ✅ NEW: debug info
-				"zone_tier":             zoneTier,      // ✅ NEW: zone tier info
-				"player_tier":           playerTier,    // ✅ NEW: spawner tier info
+				"spawn_distance":        spawnDistance,
+				"zone_tier":             zoneTier,
+				"player_tier":           playerTier,
 			},
 		}
 
 		if err := h.db.Create(&zone).Error; err == nil {
-			// ✅ Spawn items in zone
 			h.spawnItemsInZone(zone.ID, zoneTier, zone.Biome, zone.Location, zone.RadiusMeters)
 			newZones = append(newZones, zone)
 
