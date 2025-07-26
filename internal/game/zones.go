@@ -110,80 +110,156 @@ func (h *Handler) buildZoneDetails(zone common.Zone, playerLat, playerLng float6
 	return details
 }
 
-// ✅ AKTUALIZOVANÉ: Zone radius s vyššími hodnotami
-func (h *Handler) calculateZoneRadius(tier int) int {
-	switch tier {
+// ✅ AKTUALIZOVANÉ: Zone radius podľa ZONE TIER, nie player tier
+func (h *Handler) calculateZoneRadius(zoneTier int) int {
+	// Base radius + random variance pre variety
+	baseRadius := h.getBaseRadiusForTier(zoneTier)
+	variance := h.getRadiusVarianceForTier(zoneTier)
+
+	// Random radius v rámci range
+	minRadius := baseRadius - variance
+	maxRadius := baseRadius + variance
+
+	radius := minRadius + rand.Intn(maxRadius-minRadius+1)
+
+	log.Printf("📏 Zone tier %d: radius %dm (range: %d-%dm)", zoneTier, radius, minRadius, maxRadius)
+	return radius
+}
+
+// ✅ NOVÉ: Base radius podľa zone tier
+func (h *Handler) getBaseRadiusForTier(zoneTier int) int {
+	switch zoneTier {
 	case 0:
-		return 200 // Free - 200m radius (zvýšené z 100m)
+		return 200 // Tier 0 zones - 200m base
 	case 1:
-		return 250 // Basic - 250m radius (zvýšené z 150m)
+		return 250 // Tier 1 zones - 250m base
 	case 2:
-		return 300 // Premium - 300m radius (zvýšené z 200m)
+		return 300 // Tier 2 zones - 300m base
 	case 3:
-		return 350 // Pro - 350m radius (zvýšené z 250m)
+		return 350 // Tier 3 zones - 350m base
 	case 4:
-		return 400 // Elite - 400m radius (zvýšené z 300m)
+		return 400 // Tier 4 zones - 400m base
 	default:
 		return 200 // Default 200m
 	}
 }
 
-// ✅ NOVÉ: Získaj minimálnu vzdialenosť pre tier
-func (h *Handler) getMinZoneDistance(tier int) float64 {
-	switch tier {
+// ✅ NOVÉ: Variance pre natural variety
+func (h *Handler) getRadiusVarianceForTier(zoneTier int) int {
+	switch zoneTier {
 	case 0:
-		return MinZoneDistanceTier0 // 200m
+		return 30 // Tier 0: 170-230m range
 	case 1:
-		return MinZoneDistanceTier1 // 250m
+		return 40 // Tier 1: 210-290m range
 	case 2:
-		return MinZoneDistanceTier2 // 300m
+		return 50 // Tier 2: 250-350m range
 	case 3:
-		return MinZoneDistanceTier3 // 350m
+		return 60 // Tier 3: 290-410m range
 	case 4:
-		return MinZoneDistanceTier4 // 400m
+		return 70 // Tier 4: 330-470m range
 	default:
-		return MinZoneDistanceTier0 // Default 200m
+		return 30 // Default variance
 	}
 }
 
-// ✅ NOVÉ: Kontrola collision detection
-func (h *Handler) isValidZonePosition(lat, lng float64, tier int, existingZones []common.Zone) bool {
-	minDistance := h.getMinZoneDistance(tier)
+// ✅ AKTUALIZOVANÉ: Min distance podľa ZONE TIER
+func (h *Handler) getMinZoneDistanceForZoneTier(zoneTier int) float64 {
+	switch zoneTier {
+	case 0:
+		return 250.0 // Tier 0 zones - 250m minimum spacing
+	case 1:
+		return 300.0 // Tier 1 zones - 300m minimum spacing
+	case 2:
+		return 350.0 // Tier 2 zones - 350m minimum spacing
+	case 3:
+		return 400.0 // Tier 3 zones - 400m minimum spacing
+	case 4:
+		return 450.0 // Tier 4 zones - 450m minimum spacing
+	default:
+		return 250.0 // Default 250m
+	}
+}
+
+// ✅ AKTUALIZOVANÉ: Collision detection s zone tier
+func (h *Handler) isValidZonePositionForTier(lat, lng float64, zoneTier int, existingZones []common.Zone) bool {
+	minDistance := h.getMinZoneDistanceForZoneTier(zoneTier)
 
 	for _, zone := range existingZones {
 		distance := CalculateDistance(lat, lng, zone.Location.Latitude, zone.Location.Longitude)
 		if distance < minDistance {
-			log.Printf("🚫 Zone collision: distance %.1fm < minimum %.1fm (tier %d)", distance, minDistance, tier)
+			log.Printf("🚫 Zone collision: distance %.1fm < minimum %.1fm (zone tier %d)", distance, minDistance, zoneTier)
 			return false
 		}
 	}
 	return true
 }
 
-// ✅ AKTUALIZOVANÉ: Generovanie pozície s collision detection
-func (h *Handler) generateValidZonePosition(centerLat, centerLng float64, tier int, existingZones []common.Zone) (float64, float64, bool) {
-	minDistance := h.getMinZoneDistance(tier)
+// ✅ AKTUALIZOVANÉ: Generate position s zone tier
+func (h *Handler) generateValidZonePositionForTier(centerLat, centerLng float64, zoneTier int, existingZones []common.Zone) (float64, float64, bool) {
+	minDistance := h.getMinZoneDistanceForZoneTier(zoneTier)
 	scanRadius := AreaScanRadius / 1000.0 // Convert to km for GPS calculations
 
-	log.Printf("🎯 Generating zone position (tier %d, min distance: %.1fm)", tier, minDistance)
+	log.Printf("🎯 Generating zone position (zone tier %d, min distance: %.1fm)", zoneTier, minDistance)
 
 	for attempt := 0; attempt < MaxPositionAttempts; attempt++ {
 		// Generate random position within scan radius
 		lat, lng := h.generateRandomPosition(centerLat, centerLng, scanRadius*1000) // Convert back to meters
 
 		// Check if position is valid (no collisions)
-		if h.isValidZonePosition(lat, lng, tier, existingZones) {
-			log.Printf("✅ Valid position found on attempt %d: [%.6f, %.6f]", attempt+1, lat, lng)
+		if h.isValidZonePositionForTier(lat, lng, zoneTier, existingZones) {
+			log.Printf("✅ Valid position found on attempt %d: [%.6f, %.6f] (zone tier %d)", attempt+1, lat, lng, zoneTier)
 			return lat, lng, true
 		}
 
 		if attempt%10 == 9 { // Log every 10 attempts
-			log.Printf("⏳ Position attempt %d/%d failed - trying again...", attempt+1, MaxPositionAttempts)
+			log.Printf("⏳ Position attempt %d/%d failed for zone tier %d - trying again...", attempt+1, MaxPositionAttempts, zoneTier)
 		}
 	}
 
-	log.Printf("❌ Failed to find valid position after %d attempts (tier %d, min distance: %.1fm)", MaxPositionAttempts, tier, minDistance)
+	log.Printf("❌ Failed to find valid position after %d attempts (zone tier %d, min distance: %.1fm)", MaxPositionAttempts, zoneTier, minDistance)
 	return centerLat, centerLng, false // Fallback to center if no valid position found
+}
+
+// ✅ NOVÉ: Generuj zone tier na základe player tier a biome
+func (h *Handler) generateZoneTier(playerTier int, biome string) int {
+	template := GetZoneTemplate(biome)
+	minTierForBiome := template.MinTierRequired
+
+	// Zone tier môže byť od min tier pre biome až po player tier (alebo +1)
+	minZoneTier := minTierForBiome
+	maxZoneTier := int(math.Min(4, float64(playerTier+1))) // Max tier 4, môže byť +1 od player
+
+	if maxZoneTier < minZoneTier {
+		maxZoneTier = minZoneTier
+	}
+
+	// 60% šanca na player tier, 30% na nižší, 10% na vyšší
+	roll := rand.Float64()
+
+	var zoneTier int
+	if roll < 0.6 {
+		// Player tier level
+		zoneTier = playerTier
+	} else if roll < 0.9 {
+		// Lower tier (ale nie menej ako min pre biome)
+		zoneTier = int(math.Max(float64(minZoneTier), float64(playerTier-1)))
+	} else {
+		// Higher tier (ale nie viac ako max)
+		zoneTier = int(math.Min(float64(maxZoneTier), float64(playerTier+1)))
+	}
+
+	// Ensure v rámci limits
+	if zoneTier < minZoneTier {
+		zoneTier = minZoneTier
+	}
+	if zoneTier > 4 {
+		zoneTier = 4
+	}
+
+	log.Printf("🎲 Generated zone tier %d for player tier %d, biome %s (min: %d, max: %d)",
+		zoneTier, playerTier, biome, minZoneTier, maxZoneTier)
+
+	return zoneTier
 }
 
 func (h *Handler) generateRandomPosition(centerLat, centerLng, radiusMeters float64) (float64, float64) {

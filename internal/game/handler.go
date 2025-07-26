@@ -98,21 +98,24 @@ func (h *Handler) ScanArea(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ AKTUALIZOVANÉ: spawnDynamicZones s collision detection
-func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []common.Zone {
+// ✅ AKTUALIZOVANÉ: spawnDynamicZones s tier-based zone sizing
+func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int) []common.Zone {
 	var newZones []common.Zone
 
 	// Get existing zones for collision detection
 	existingZones := h.getExistingZonesInArea(lat, lng, AreaScanRadius)
-	log.Printf("🏗️ Spawning %d zones (tier %d) with %d existing zones for collision check", count, tier, len(existingZones))
+	log.Printf("🏗️ Spawning %d zones for player tier %d with %d existing zones for collision check", count, playerTier, len(existingZones))
 
 	for i := 0; i < count; i++ {
 		// ✅ ZMENA: použiť nový selectBiome
-		biome := h.selectBiome(tier)
+		biome := h.selectBiome(playerTier)
 		template := GetZoneTemplate(biome)
 
-		// ✅ NOVÉ: Generate valid position with collision detection
-		zoneLat, zoneLng, positionValid := h.generateValidZonePosition(lat, lng, tier, existingZones)
+		// ✅ NOVÉ: Generuj zone tier (nezávisle od player tier)
+		zoneTier := h.generateZoneTier(playerTier, biome)
+
+		// ✅ NOVÉ: Generate valid position s zone tier
+		zoneLat, zoneLng, positionValid := h.generateValidZonePositionForTier(lat, lng, zoneTier, existingZones)
 		if !positionValid {
 			log.Printf("⚠️ Using fallback position for zone %d (collision detection failed)", i+1)
 		}
@@ -128,12 +131,12 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 			BaseModel: common.BaseModel{ID: uuid.New()},
 			Name:      h.generateZoneName(biome),
 			Location: common.Location{
-				Latitude:  zoneLat, // ✅ ZMENA: Použiť validovanú pozíciu
-				Longitude: zoneLng, // ✅ ZMENA: Použiť validovanú pozíciu
+				Latitude:  zoneLat,
+				Longitude: zoneLng,
 				Timestamp: time.Now(),
 			},
-			TierRequired: template.MinTierRequired,
-			RadiusMeters: h.calculateZoneRadius(tier), // ✅ ZMENA: Zvýšené radiusy
+			TierRequired: zoneTier,                        // ✅ ZMENA: Použiť zone tier namiesto template
+			RadiusMeters: h.calculateZoneRadius(zoneTier), // ✅ ZMENA: Zone tier pre radius
 			IsActive:     true,
 			ZoneType:     "dynamic",
 			Biome:        biome,
@@ -151,27 +154,30 @@ func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []com
 				"danger_level":          template.DangerLevel,
 				"environmental_effects": template.EnvironmentalEffects,
 				"zone_template":         "biome_based",
-				"collision_detected":    !positionValid,             // ✅ NOVÉ: Track collision info
-				"min_distance_enforced": h.getMinZoneDistance(tier), // ✅ NOVÉ: Track min distance used
+				"collision_detected":    !positionValid,
+				"min_distance_enforced": h.getMinZoneDistanceForZoneTier(zoneTier), // ✅ ZMENA: Zone tier
+				"zone_tier":             zoneTier,                                  // ✅ NOVÉ: Track zone tier
+				"player_tier":           playerTier,                                // ✅ NOVÉ: Track spawning player tier
+				"radius_range":          fmt.Sprintf("%d-%dm", h.getBaseRadiusForTier(zoneTier)-h.getRadiusVarianceForTier(zoneTier), h.getBaseRadiusForTier(zoneTier)+h.getRadiusVarianceForTier(zoneTier)),
 			},
 		}
 
 		if err := h.db.Create(&zone).Error; err == nil {
-			// ✅ ZMENA: nová spawnItemsInZone funkcia
-			h.spawnItemsInZone(zone.ID, tier, zone.Biome, zone.Location, zone.RadiusMeters)
+			// ✅ ZMENA: použiť zone tier pre item spawning
+			h.spawnItemsInZone(zone.ID, zoneTier, zone.Biome, zone.Location, zone.RadiusMeters)
 			newZones = append(newZones, zone)
 
 			// ✅ NOVÉ: Pridaj do existingZones pre ďalšie collision checks
 			existingZones = append(existingZones, zone)
 
-			log.Printf("🏰 Zone spawned: %s (Biome: %s, Radius: %dm, TTL: %.1fh, Position: [%.6f, %.6f])",
-				zone.Name, biome, zone.RadiusMeters, randomTTL.Hours(), zoneLat, zoneLng)
+			log.Printf("🏰 Zone spawned: %s (Tier: %d, Biome: %s, Radius: %dm, TTL: %.1fh, Position: [%.6f, %.6f])",
+				zone.Name, zoneTier, biome, zone.RadiusMeters, randomTTL.Hours(), zoneLat, zoneLng)
 		} else {
 			log.Printf("❌ Failed to create zone: %v", err)
 		}
 	}
 
-	log.Printf("✅ Zone spawning complete: %d/%d zones created successfully", len(newZones), count)
+	log.Printf("✅ Zone spawning complete: %d/%d zones created successfully for player tier %d", len(newZones), count, playerTier)
 	return newZones
 }
 
