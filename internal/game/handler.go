@@ -58,33 +58,27 @@ func (h *Handler) ScanArea(c *gin.Context) {
 		return
 	}
 
-	// ✅ AKTUALIZOVANÉ: Rozdielne radiusy pre scan vs spawn
-	// Scan 7km radius - vidí všetky zóny
-	existingZonesInScanArea := h.getExistingZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
-
-	// Count len v spawn radius - spawnovanie len v 2km
-	currentDynamicZonesInSpawnArea := h.countDynamicZonesInSpawnArea(req.Latitude, req.Longitude, AreaSpawnRadius)
+	// Get existing zones in area
+	existingZones := h.getExistingZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
 
 	// Calculate how many new zones can be created
 	maxZones := h.calculateMaxZones(user.Tier)
-	newZonesNeeded := maxZones - currentDynamicZonesInSpawnArea // ✅ ZMENA: používa spawn area count
+	currentDynamicZones := h.countDynamicZonesInArea(req.Latitude, req.Longitude, AreaScanRadius)
+	newZonesNeeded := maxZones - currentDynamicZones
 
 	var newZones []common.Zone
 	if newZonesNeeded > 0 {
-		log.Printf("🏗️ Creating %d new zones in spawn radius (%.0fm) for tier %d player",
-			newZonesNeeded, AreaSpawnRadius, user.Tier)
-
-		// ✅ NOVÉ: Spawn len v 2km radius, ale collision check s celou 7km oblasťou
-		newZones = h.spawnDynamicZonesInRadius(req.Latitude, req.Longitude, user.Tier, newZonesNeeded, AreaSpawnRadius, existingZonesInScanArea)
+		log.Printf("🏗️ Creating %d new zones for tier %d player", newZonesNeeded, user.Tier)
+		newZones = h.spawnDynamicZones(req.Latitude, req.Longitude, user.Tier, newZonesNeeded)
 	}
 
-	// Combine all zones v scan area (7km) - ✅ ZACHOVANÉ: vidí všetky zóny v 7km
-	allZones := append(existingZonesInScanArea, newZones...)
+	// Combine all zones
+	allZones := append(existingZones, newZones...)
 
-	// Filter zones by tier - ✅ ZACHOVANÉ: tier filtering
+	// Filter zones by tier
 	visibleZones := h.filterZonesByTier(allZones, user.Tier)
 
-	// Build detailed zone info - ✅ ZACHOVANÉ: rovnaká logika
+	// Build detailed zone info
 	var zoneDetails []ZoneWithDetails
 	for _, zone := range visibleZones {
 		details := h.buildZoneDetails(zone, req.Latitude, req.Longitude, user.Tier)
@@ -99,37 +93,70 @@ func (h *Handler) ScanArea(c *gin.Context) {
 		MaxZones:          maxZones,
 		CurrentZoneCount:  len(visibleZones),
 		PlayerTier:        user.Tier,
-
-		// ✅ NOVÉ: Info o radiusoch
-		ScanRadius:       AreaScanRadius,                 // 7km - čo vidíš
-		SpawnRadius:      AreaSpawnRadius,                // 2km - kde spawnovať
-		ZonesInSpawnArea: currentDynamicZonesInSpawnArea, // Počet zón v spawn area
 	}
 
 	c.JSON(http.StatusOK, response)
 }
 
-// ✅ AKTUALIZOVANÉ: spawnDynamicZones redirect na novú radius-controlled funkciu
-func (h *Handler) spawnDynamicZones(lat, lng float64, playerTier int, count int) []common.Zone {
-	// 🚨 DEBUG: Skontroluj či sa táto funkcia volá
-	log.Printf("🚨 [DEBUG] spawnDynamicZones called with playerTier=%d, count=%d", playerTier, count)
+// ✅ REFAKTOROVANÉ: spawnDynamicZones používa templates z biomes.go
+func (h *Handler) spawnDynamicZones(lat, lng float64, tier int, count int) []common.Zone {
+	var newZones []common.Zone
 
-	// ✅ NOVÉ: Redirect na novú radius-controlled funkciu
-	existingZones := h.getExistingZonesInArea(lat, lng, AreaScanRadius)
-	log.Printf("🔄 [silverminesro] Redirecting to radius-controlled spawning (spawn radius: %.0fm, scan radius: %.0fm)",
-		AreaSpawnRadius, AreaScanRadius)
-	log.Printf("🏗️ Spawning %d zones for player tier %d with %d existing zones for collision check",
-		count, playerTier, len(existingZones))
+	for i := 0; i < count; i++ {
+		// ✅ ZMENA: použiť nový selectBiome
+		biome := h.selectBiome(tier)
+		template := GetZoneTemplate(biome)
 
-	// 🚨 DEBUG: Skontroluj pred volaním
-	log.Printf("🚨 [DEBUG] About to call spawnDynamicZonesInRadius with spawnRadius=%.0f", AreaSpawnRadius)
+		// Random TTL between 6-24 hours
+		minTTL := time.Duration(ZoneMinExpiryHours) * time.Hour
+		maxTTL := time.Duration(ZoneMaxExpiryHours) * time.Hour
+		ttlRange := maxTTL - minTTL
+		randomTTL := minTTL + time.Duration(rand.Float64()*float64(ttlRange))
+		expiresAt := time.Now().Add(randomTTL)
 
-	result := h.spawnDynamicZonesInRadius(lat, lng, playerTier, count, AreaSpawnRadius, existingZones)
+		zone := common.Zone{
+			BaseModel: common.BaseModel{ID: uuid.New()},
+			Name:      h.generateZoneName(biome), // ✅ ZMENA: nová funkcia
+			Location: common.Location{
+				Latitude:  lat + (rand.Float64()-0.5)*0.01,
+				Longitude: lng + (rand.Float64()-0.5)*0.01,
+				Timestamp: time.Now(),
+			},
+			TierRequired: template.MinTierRequired, // ✅ ZMENA: z template
+			RadiusMeters: h.calculateZoneRadius(tier),
+			IsActive:     true,
+			ZoneType:     "dynamic",
+			Biome:        biome,
+			DangerLevel:  template.DangerLevel, // ✅ ZMENA: z template
 
-	// 🚨 DEBUG: Skontroluj po volaní
-	log.Printf("🚨 [DEBUG] spawnDynamicZonesInRadius returned %d zones", len(result))
+			// TTL fields
+			ExpiresAt:    &expiresAt,
+			LastActivity: time.Now(),
+			AutoCleanup:  true,
 
-	return result
+			Properties: common.JSONB{
+				"spawned_by":            "scan_area",
+				"ttl_hours":             randomTTL.Hours(),
+				"biome":                 biome,
+				"danger_level":          template.DangerLevel,
+				"environmental_effects": template.EnvironmentalEffects, // ✅ NOVÉ
+				"zone_template":         "biome_based",
+			},
+		}
+
+		if err := h.db.Create(&zone).Error; err == nil {
+			// ✅ ZMENA: nová spawnItemsInZone funkcia
+			h.spawnItemsInZone(zone.ID, tier, zone.Biome, zone.Location, zone.RadiusMeters)
+			newZones = append(newZones, zone)
+
+			log.Printf("🏰 Zone spawned: %s (Biome: %s, TTL: %.1fh, expires: %s)",
+				zone.Name, biome, randomTTL.Hours(), expiresAt.Format("15:04"))
+		} else {
+			log.Printf("❌ Failed to create zone: %v", err)
+		}
+	}
+
+	return newZones
 }
 
 // GetNearbyZones - získanie zón v okolí
