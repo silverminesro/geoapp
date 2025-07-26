@@ -507,6 +507,21 @@ func (h *Handler) generateValidZonePositionInRadius(centerLat, centerLng float64
 
 // ✅ NOVÉ: Calculate tier-specific spawn radius (blízko = nízky tier, ďaleko = vysoký tier)
 func (h *Handler) calculateTierSpawnRadius(zoneTier int, maxSpawnRadius float64) float64 {
+	// 🚨 DEBUG: Force specific distances to test - ODSTRÁŇ PO TESTOVANÍ!
+	debugDistances := map[int]float64{
+		0: 400.0,  // T0 = 400m (blízko)
+		1: 600.0,  // T1 = 600m
+		2: 1000.0, // T2 = 1000m
+		3: 1500.0, // T3 = 1500m
+		4: 1900.0, // T4 = 1900m (ďaleko)
+	}
+
+	if debugDist, exists := debugDistances[zoneTier]; exists {
+		log.Printf("🚨 DEBUG: Forcing tier %d to distance %.0fm", zoneTier, debugDist)
+		return debugDist
+	}
+	// 🚨 END DEBUG
+
 	// ⚙️ KONFIGUROVATEĽNÉ NASTAVENIA - zmena týchto hodnôt ovplyvní spawn distances
 	tierDistanceRanges := map[int][2]float64{
 		// Format: tier: {min_percentage, max_percentage} z maxSpawnRadius
