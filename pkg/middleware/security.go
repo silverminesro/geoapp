@@ -115,7 +115,13 @@ func BasicSecurity() gin.HandlerFunc {
 		for _, suspPath := range suspiciousPaths {
 			if strings.Contains(path, suspPath) {
 				log.Printf("⚠️ [SECURITY] ATTACK PATH from %s: %s %s", clientIP, method, path)
-				blacklistedIPs[clientIP] = true
+				// Okamžité blokovanie pre kritické legacy cesty
+				if suspPath == "/cgi-bin/" || suspPath == "/boaform/" {
+					blacklistedIPs[clientIP] = true
+					log.Printf("🚫 [SECURITY] IMMEDIATE BLACKLIST: %s (critical attack path)", clientIP)
+				} else {
+					blacklistedIPs[clientIP] = true
+				}
 				c.JSON(http.StatusNotFound, gin.H{
 					"error": "Not found",
 				})
@@ -199,15 +205,19 @@ func (sm *SecurityMiddleware) securityCheck() gin.HandlerFunc {
 		for _, suspPath := range suspiciousPaths {
 			if strings.Contains(path, suspPath) {
 				log.Printf("⚠️ [SECURITY] ATTACK PATH from %s: %s %s", clientIP, method, path)
-
-				// Count suspicious attempts (vyššie threshold)
-				suspCount := sm.incrementSuspiciousCount(clientIP)
-				if suspCount >= 5 { // Zvýšené z 3 na 5
-					log.Printf("🚫 [SECURITY] AUTO-BLACKLISTED: %s (5+ attack attempts)", clientIP)
+				// Okamžité blokovanie pre kritické legacy cesty
+				if suspPath == "/cgi-bin/" || suspPath == "/boaform/" {
 					blacklistedIPs[clientIP] = true
-					sm.saveToRedisBlacklist(clientIP, "ATTACK_PATHS")
+					sm.saveToRedisBlacklist(clientIP, "CRITICAL_ATTACK_PATH")
+					log.Printf("🚫 [SECURITY] IMMEDIATE BLACKLIST: %s (critical attack path)", clientIP)
+				} else {
+					suspCount := sm.incrementSuspiciousCount(clientIP)
+					if suspCount >= 5 {
+						log.Printf("🚫 [SECURITY] AUTO-BLACKLISTED: %s (5+ attack attempts)", clientIP)
+						blacklistedIPs[clientIP] = true
+						sm.saveToRedisBlacklist(clientIP, "ATTACK_PATHS")
+					}
 				}
-
 				c.JSON(http.StatusNotFound, gin.H{
 					"error": "Not found",
 				})
