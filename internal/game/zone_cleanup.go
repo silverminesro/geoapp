@@ -162,13 +162,13 @@ func (cs *CleanupService) GetCleanupStats() map[string]interface{} {
 
 // Overí, či je zóna prázdna (žiadne aktívne artefakty/gear) a ak áno, nastaví is_active=false
 func (cs *CleanupService) SoftDeactivateZoneIfEmpty(zoneID uuid.UUID, reason string) (bool, error) {
-	var activeArtifacts int64
-	var activeGear int64
+	var artifactCount, gearCount int64
 
-	cs.db.Model(&common.Artifact{}).Where("zone_id = ? AND is_active = true", zoneID).Count(&activeArtifacts)
-	cs.db.Model(&common.Gear{}).Where("zone_id = ? AND is_active = true", zoneID).Count(&activeGear)
+	// POZOR: už nekontrolujeme is_active, len existenciu záznamov
+	cs.db.Model(&common.Artifact{}).Where("zone_id = ?", zoneID).Count(&artifactCount)
+	cs.db.Model(&common.Gear{}).Where("zone_id = ?", zoneID).Count(&gearCount)
 
-	if activeArtifacts == 0 && activeGear == 0 {
+	if artifactCount == 0 && gearCount == 0 {
 		var zone common.Zone
 		if err := cs.db.First(&zone, "id = ?", zoneID).Error; err != nil {
 			return false, fmt.Errorf("zone not found: %v", err)
@@ -185,5 +185,5 @@ func (cs *CleanupService) SoftDeactivateZoneIfEmpty(zoneID uuid.UUID, reason str
 		return true, nil
 	}
 
-	return false, nil // stále sú v zóne nejaké aktívne artefakty alebo gear
+	return false, nil // stále sú v zóne nejaké artifacts alebo gear
 }
