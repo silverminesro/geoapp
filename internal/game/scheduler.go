@@ -2,7 +2,6 @@ package game
 
 import (
 	"context"
-	"geoanomaly/internal/common"
 	"log"
 	"time"
 
@@ -58,21 +57,11 @@ func (s *Scheduler) Start() {
 	go func() {
 		log.Printf("🧹 Running initial cleanup...")
 		result := s.cleanupService.CleanupExpiredZones()
-		s.DeactivateEmptyZones() // 🟢 PRIDANÉ: volanie deaktivácie prázdnych zón
 		s.logCleanupResult(result)
 	}()
 
 	// Start scheduled cleanup
 	go s.run()
-}
-
-// 🟢 PRIDANÁ: DeactivateEmptyZones - deaktivuje všetky zóny bez artifacts a gear
-func (s *Scheduler) DeactivateEmptyZones() {
-	var activeZones []common.Zone
-	s.db.Where("is_active = true").Find(&activeZones)
-	for _, zone := range activeZones {
-		s.cleanupService.SoftDeactivateZoneIfEmpty(zone.ID, "auto_empty_cleanup")
-	}
 }
 
 // ✅ Stop scheduler
