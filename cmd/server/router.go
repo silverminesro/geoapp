@@ -302,26 +302,13 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 	inventoryRoutes := v1.Group("/inventory")
 	inventoryRoutes.Use(middleware.JWTAuth())
 	{
-		inventoryRoutes.GET("/items", inventoryHandler.GetInventory) // ✅ CHANGED FROM "/"
+		inventoryRoutes.GET("/items", inventoryHandler.GetInventory)
 		inventoryRoutes.GET("/summary", inventoryHandler.GetInventorySummary)
 		inventoryRoutes.DELETE("/:id", inventoryHandler.DeleteItem)
-
-		// Future inventory routes (placeholders)
-		inventoryRoutes.POST("/:id/use", func(c *gin.Context) {
-			c.JSON(501, gin.H{
-				"error":   "Not implemented",
-				"message": "Item usage not implemented yet",
-				"status":  "planned",
-			})
-		})
-
-		inventoryRoutes.PUT("/:id/favorite", func(c *gin.Context) {
-			c.JSON(501, gin.H{
-				"error":   "Not implemented",
-				"message": "Item favoriting not implemented yet",
-				"status":  "planned",
-			})
-		})
+		inventoryRoutes.POST("/:id/use", inventoryHandler.UseItem)
+		inventoryRoutes.PUT("/:id/favorite", inventoryHandler.SetFavorite)
+		inventoryRoutes.GET("/items/:id", inventoryHandler.GetItemDetail)
+		inventoryRoutes.PUT("/:id/equip", inventoryHandler.EquipItem) // dorobiť!!
 	}
 
 	// ==========================================
