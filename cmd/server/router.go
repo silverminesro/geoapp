@@ -8,15 +8,15 @@ import (
 	"geoanomaly/internal/game"
 	"geoanomaly/internal/inventory"
 	"geoanomaly/internal/location"
+	"geoanomaly/internal/media" // 🆕 MEDIA - PRIDANE
 	"geoanomaly/internal/user"
-	"geoanomaly/pkg/middleware" // 🛡️ OPRAVENÉ: správna cesta
+	"geoanomaly/pkg/middleware"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9" // 🛡️ PRIDANÉ
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-// 🛡️ OPRAVENÉ: Pridaný redisClient parameter
 func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -27,21 +27,30 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		router.Use(middleware.Security(redisClient))
 		router.Use(middleware.RateLimit(redisClient))
 	} else {
-		// Ak nie je Redis, použijeme aspoň basic security
-		router.Use(middleware.BasicSecurity()) // Vytvoríme túto funkciu
+		router.Use(middleware.BasicSecurity())
 	}
 
-	// Global middleware (v správnom poradí)
 	router.Use(middleware.Logger())
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
 
-	// ✅ UPDATED: Added inventory handler
 	authHandler := auth.NewHandler(db, nil)
 	userHandler := user.NewHandler(db, nil)
 	gameHandler := game.NewHandler(db, nil)
 	locationHandler := location.NewHandler(db, nil)
 	inventoryHandler := inventory.NewHandler(db)
+
+	// 🆕 MEDIA - PRIDANE (Inicializácia)
+	mediaService, err := media.NewService(
+		getEnvVar("R2_ENDPOINT", "xxx.r2.cloudflarestorage.com"),
+		getEnvVar("R2_ACCESS_KEY", ""),
+		getEnvVar("R2_SECRET_KEY", ""),
+		getEnvVar("R2_BUCKET", "geoanomaly"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	mediaHandler := media.NewHandler(mediaService)
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
@@ -49,7 +58,6 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		if redisClient != nil {
 			redisStatus = "connected"
 		}
-
 		c.JSON(200, gin.H{
 			"status":     "healthy",
 			"timestamp":  time.Now().Format(time.RFC3339),
@@ -57,18 +65,16 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			"service":    "geoanomaly-backend",
 			"created_by": "silverminesro",
 			"structure":  "unified",
-			"security":   "🛡️ active", // 🛡️ NOVÉ
-			"redis":      redisStatus, // 🛡️ NOVÉ
+			"security":   "🛡️ active",
+			"redis":      redisStatus,
 		})
 	})
 
-	// Basic info endpoint
 	router.GET("/info", func(c *gin.Context) {
 		redisStatus := "disabled"
 		if redisClient != nil {
 			redisStatus = "connected"
 		}
-
 		c.JSON(200, gin.H{
 			"name":        "GeoAnomaly Backend",
 			"version":     "1.0.0",
@@ -77,8 +83,8 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			"developer":   "silverminesro",
 			"database":    getEnvVar("DB_NAME", "geoanomaly") + "@" + getEnvVar("DB_HOST", "localhost"),
 			"structure":   "unified",
-			"security":    "🛡️ CONNECT attacks blocked", // 🛡️ NOVÉ
-			"redis":       redisStatus,                  // 🛡️ NOVÉ
+			"security":    "🛡️ CONNECT attacks blocked",
+			"redis":       redisStatus,
 		})
 	})
 
@@ -94,7 +100,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"developer": "silverminesro",
 				"status":    "operational",
 				"version":   "unified-structure",
-				"security":  "🛡️ protected", // 🛡️ NOVÉ
+				"security":  "🛡️ protected",
 			})
 		})
 
@@ -124,7 +130,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				},
 				"message":   "Database connection successful! 🎯",
 				"timestamp": time.Now().Format(time.RFC3339),
-				"security":  "🛡️ rate limited", // 🛡️ NOVÉ
+				"security":  "🛡️ rate limited",
 			})
 		})
 
@@ -220,7 +226,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 					"environment": getEnvVar("APP_ENV", "development"),
 					"version":     "1.0.0",
 					"structure":   "unified",
-					"security":    "🛡️ active", // 🛡️ NOVÉ
+					"security":    "🛡️ active",
 				},
 				"database": gin.H{
 					"status": dbStatus,
@@ -230,7 +236,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"redis": gin.H{
 					"status": redisStatus,
 				},
-				"security": gin.H{ // 🛡️ NOVÉ sekcia
+				"security": gin.H{
 					"connect_blocking": "active",
 					"rate_limiting":    "active",
 					"blacklisted_ips":  4,
@@ -262,6 +268,14 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"timestamp": time.Now().Format(time.RFC3339),
 			})
 		})
+
+		// 🆕 MEDIA ROUTES (Protected - JWT required)
+		mediaRoutes := v1.Group("/media")
+		mediaRoutes.Use(middleware.JWTAuth())
+		{
+			mediaRoutes.GET("/:filename", mediaHandler.GetImage)
+			// ak chceš prefix /images, použi: mediaRoutes.GET("/images/:filename", mediaHandler.GetImage)
+		}
 	}
 
 	// ==========================================
@@ -297,7 +311,6 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 
 	// ==========================================
 	// 🎒 INVENTORY ROUTES (Protected - JWT required)
-	// ✅ FIXED: Using specific paths to avoid conflicts
 	// ==========================================
 	inventoryRoutes := v1.Group("/inventory")
 	inventoryRoutes.Use(middleware.JWTAuth())
@@ -308,7 +321,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		inventoryRoutes.POST("/:id/use", inventoryHandler.UseItem)
 		inventoryRoutes.PUT("/:id/favorite", inventoryHandler.SetFavorite)
 		inventoryRoutes.GET("/items/:id", inventoryHandler.GetItemDetail)
-		inventoryRoutes.PUT("/:id/equip", inventoryHandler.EquipItem) // dorobiť!!
+		inventoryRoutes.PUT("/:id/equip", inventoryHandler.EquipItem)
 	}
 
 	// ==========================================
@@ -383,7 +396,6 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		securityRoutes := adminRoutes.Group("/security")
 		{
 			securityRoutes.GET("/blacklist", func(c *gin.Context) {
-				// Implementovať zobrazenie blacklistu
 				c.JSON(200, gin.H{
 					"message": "Security blacklist endpoint",
 					"status":  "implemented",
@@ -391,7 +403,6 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			})
 
 			securityRoutes.POST("/blacklist/:ip", func(c *gin.Context) {
-				// Implementovať manuálne pridanie do blacklistu
 				c.JSON(200, gin.H{
 					"message": "Manual IP blacklist endpoint",
 					"status":  "implemented",
@@ -399,7 +410,6 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			})
 
 			securityRoutes.DELETE("/blacklist/:ip", func(c *gin.Context) {
-				// Implementovať odstránenie z blacklistu
 				c.JSON(200, gin.H{
 					"message": "Remove from blacklist endpoint",
 					"status":  "implemented",
@@ -426,7 +436,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"redis":     redisStatus,
 				"version":   "1.0.0",
 				"structure": "unified",
-				"security":  "🛡️ active", // 🛡️ NOVÉ
+				"security":  "🛡️ active",
 			})
 		})
 
@@ -446,7 +456,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"inventory_items": inventoryCount,
 				"server_uptime":   time.Since(startTime).String(),
 				"last_cleanup":    "never",
-				"security_status": "🛡️ active", // 🛡️ NOVÉ
+				"security_status": "🛡️ active",
 			})
 		})
 
@@ -455,7 +465,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"message":   "GeoAnomaly API Endpoints",
 				"version":   "1.0.0",
 				"structure": "unified",
-				"security":  "🛡️ CONNECT attacks blocked", // 🛡️ NOVÉ
+				"security":  "🛡️ CONNECT attacks blocked",
 				"endpoints": gin.H{
 					"inventory": gin.H{
 						"GET /inventory/items":     "🎒 Get user inventory (FIXED)",
@@ -463,7 +473,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 						"DELETE /inventory/{id}":   "🗑️ Delete inventory item",
 						"POST /inventory/{id}/use": "⚡ Use inventory item (planned)",
 					},
-					"security": gin.H{ // 🛡️ NOVÉ
+					"security": gin.H{
 						"GET /api/v1/security/status":        "🛡️ Security status",
 						"GET /admin/security/blacklist":      "🚫 View blacklist",
 						"POST /admin/security/blacklist/*":   "➕ Add to blacklist",
@@ -483,7 +493,6 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			c.String(200, "# GeoAnomaly Metrics\n# Coming soon...")
 		})
 
-		// 🛡️ NOVÉ: Security metrics
 		metricsRoutes.GET("/security", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"blocked_ips":      4,
@@ -495,11 +504,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		})
 	}
 
-	// ==========================================
-	// 🚫 ERROR HANDLERS
-	// ==========================================
 	router.NoRoute(func(c *gin.Context) {
-		// 🛡️ NOVÉ: Log 404 attempts (môžu byť útoky)
 		c.JSON(404, gin.H{
 			"error":     "Endpoint not found",
 			"path":      c.Request.URL.Path,
@@ -507,7 +512,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			"message":   "The requested API endpoint does not exist",
 			"hint":      "Visit /api/v1/system/endpoints for available endpoints",
 			"structure": "unified",
-			"security":  "🛡️ monitored", // 🛡️ NOVÉ
+			"security":  "🛡️ monitored",
 		})
 	})
 
