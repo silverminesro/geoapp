@@ -33,6 +33,5 @@ func (h *Handler) GetImage(c *gin.Context) {
 	}
 	c.Header("Content-Type", stat.ContentType)
 	c.Header("Content-Length", strconv.FormatInt(stat.Size, 10))
-	_, _ = io.Copy(c.Writer, obj)
-	_, _ = io.Copy(c.Writer, obj)
+	io.Copy(c.Writer, obj)
 }
