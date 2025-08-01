@@ -80,49 +80,65 @@ func (h *Handler) GetInventory(c *gin.Context) {
 			"created_at": rawItem["created_at"],
 		}
 
-		// Handle properties as map
-		if props, ok := rawItem["properties"].(map[string]interface{}); ok {
-			itemData["properties"] = props
+		// ✅ FIX: Handle properties - they might be string in DB
+		var properties map[string]interface{}
 
-			// Extract common properties
-			if name, ok := props["name"].(string); ok {
-				itemData["name"] = name
+		switch props := rawItem["properties"].(type) {
+		case string:
+			// Properties are stored as JSON string, parse them
+			if err := json.Unmarshal([]byte(props), &properties); err != nil {
+				log.Printf("Failed to parse properties string: %v", err)
+				properties = make(map[string]interface{})
 			}
-			if desc, ok := props["description"].(string); ok {
-				itemData["description"] = desc
+		case map[string]interface{}:
+			// Properties are already a map
+			properties = props
+		default:
+			log.Printf("Unexpected properties type: %T", rawItem["properties"])
+			properties = make(map[string]interface{})
+		}
+
+		// Store parsed properties
+		itemData["properties"] = properties
+
+		// Extract common properties
+		if name, ok := properties["name"].(string); ok {
+			itemData["name"] = name
+		}
+		if desc, ok := properties["description"].(string); ok {
+			itemData["description"] = desc
+		}
+		if rarity, ok := properties["rarity"].(string); ok {
+			itemData["rarity"] = rarity
+		}
+		if biome, ok := properties["biome"].(string); ok {
+			itemData["biome"] = biome
+		}
+
+		// Add image URL based on item type
+		itemTypeStr, _ := rawItem["item_type"].(string)
+		if itemTypeStr == "artifact" {
+			if artifactType, exists := properties["type"].(string); exists {
+				itemData["image_url"] = fmt.Sprintf("/api/v1/media/artifact/%s", artifactType)
 			}
-			if rarity, ok := props["rarity"].(string); ok {
-				itemData["rarity"] = rarity
-			}
-			if biome, ok := props["biome"].(string); ok {
-				itemData["biome"] = biome
+		} else if itemTypeStr == "gear" {
+			// For gear, we might use a different pattern
+			if gearType, exists := properties["type"].(string); exists {
+				itemData["image_url"] = fmt.Sprintf("/api/v1/media/gear/%s", gearType)
 			}
 
-			// Add image URL based on item type
-			itemTypeStr, _ := rawItem["item_type"].(string)
-			if itemTypeStr == "artifact" {
-				if artifactType, exists := props["type"].(string); exists {
-					itemData["image_url"] = fmt.Sprintf("/api/v1/media/artifact/%s", artifactType)
-				}
-			} else if itemTypeStr == "gear" {
-				// For gear, we might use a different pattern
-				if gearType, exists := props["type"].(string); exists {
-					itemData["image_url"] = fmt.Sprintf("/api/v1/media/gear/%s", gearType)
-				}
-
-				// Add equipped status for gear
-				if equipped, ok := props["equipped"].(bool); ok {
-					itemData["equipped"] = equipped
-				}
-				if slot, ok := props["slot"].(string); ok {
-					itemData["slot"] = slot
-				}
+			// Add equipped status for gear
+			if equipped, ok := properties["equipped"].(bool); ok {
+				itemData["equipped"] = equipped
 			}
-
-			// Add favorite status
-			if favorite, ok := props["favorite"].(bool); ok {
-				itemData["favorite"] = favorite
+			if slot, ok := properties["slot"].(string); ok {
+				itemData["slot"] = slot
 			}
+		}
+
+		// Add favorite status
+		if favorite, ok := properties["favorite"].(bool); ok {
+			itemData["favorite"] = favorite
 		}
 
 		formattedItems = append(formattedItems, itemData)
