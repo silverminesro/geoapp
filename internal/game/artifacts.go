@@ -10,7 +10,7 @@ func GetArtifactDisplayName(artifactType string) string {
 		"tree_resin":      "Amber Tree Resin",
 		"animal_bones":    "Predator Bones",
 		"herbal_extract":  "Healing Herb Extract",
-		"old_coin":        "Pre-War Coin",
+		"dewdrop_pearl":   "Dewdrop Pearl",
 
 		// Mountain artifacts
 		"mineral_ore":   "Rare Mineral Ore",
@@ -20,7 +20,7 @@ func GetArtifactDisplayName(artifactType string) string {
 		"ice_crystal":   "Frozen Ice Crystal",
 
 		// Industrial artifacts
-		"steel_ingot":          "Military Steel Ingot",
+		"rusty_gear":           "Rusty Gear Relic",
 		"chemical_sample":      "Unknown Chemical Sample",
 		"machinery_parts":      "Industrial Machinery Parts",
 		"electronic_component": "Advanced Electronic Component",
@@ -31,13 +31,13 @@ func GetArtifactDisplayName(artifactType string) string {
 		"medical_supplies": "Medical Emergency Kit",
 		"electronics":      "Salvaged Electronics",
 		"urban_artifact":   "City Historical Artifact",
-		"cash_register":    "Vintage Cash Register",
+		"pocket_radio":     "Pocket Radio Receiver",
 
 		// Water artifacts
 		"water_sample":   "Contaminated Water Sample",
 		"aquatic_plant":  "Mutant Aquatic Plant",
 		"filtered_water": "Purified Water Container",
-		"swamp_gas":      "Methane Gas Canister",
+		"abyss_pearl":    "Abyss Pearl",
 		"algae_biomass":  "Toxic Algae Biomass",
 
 		// Radioactive artifacts
