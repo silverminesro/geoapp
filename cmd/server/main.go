@@ -12,19 +12,21 @@ import (
 
 	"geoanomaly/internal/common"
 	"geoanomaly/internal/game"
-	"geoanomaly/pkg/middleware" // 🛡️ PRIDANÉ
+	"geoanomaly/internal/media"
+	"geoanomaly/pkg/middleware"
 
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9" // 🛡️ PRIDANÉ
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 var (
 	db          *gorm.DB
-	redisClient *redis.Client // 🛡️ PRIDANÉ
+	redisClient *redis.Client
 	startTime   time.Time
 	scheduler   *game.Scheduler
+	r2Client    *media.R2Client // Pridané pre R2
 )
 
 func init() {
@@ -52,12 +54,10 @@ func main() {
 	}
 	log.Println("✅ Environment configuration validated")
 
-	// 🛡️ NOVÉ: Initialize Redis connection
+	// Initialize Redis connection
 	redisClient = initRedis()
 	if redisClient != nil {
 		log.Println("✅ Redis connected successfully")
-
-		// 🛡️ NOVÉ: Load blacklist from Redis
 		middleware.LoadBlacklistFromRedis(redisClient)
 	} else {
 		log.Println("⚠️  Redis disabled - security middleware will work without persistence")
@@ -83,7 +83,23 @@ func main() {
 	}
 	log.Println("✅ Database migrations status verified")
 
-	// ✅ NEW: Start zone cleanup scheduler
+	// Initialize R2 client
+	log.Println("🖼️  Initializing Cloudflare R2 client...")
+	r2Client, err = media.NewR2Client(
+		getEnvVar("R2_ACCOUNT_ID", ""),
+		getEnvVar("R2_ACCESS_KEY_ID", ""),
+		getEnvVar("R2_SECRET_ACCESS_KEY", ""),
+		getEnvVar("R2_BUCKET_NAME", "geoanomaly-artifacts"),
+	)
+	if err != nil {
+		log.Printf("⚠️  Failed to initialize R2 client: %v", err)
+		log.Println("⚠️  Media service will be disabled")
+		r2Client = nil
+	} else {
+		log.Println("✅ R2 client initialized successfully")
+	}
+
+	// Start zone cleanup scheduler
 	log.Println("🕐 Starting Zone TTL Cleanup Scheduler...")
 	scheduler = game.NewScheduler(db)
 	scheduler.Start()
@@ -92,8 +108,8 @@ func main() {
 	// Setup graceful shutdown
 	setupGracefulShutdown()
 
-	// 🛡️ NOVÉ: Setup routes with security middleware
-	router := setupRoutes(db, redisClient)
+	// Setup routes with security middleware and R2 client
+	router := setupRoutes(db, redisClient, r2Client)
 
 	// Get server configuration from .env
 	port := getEnvVar("PORT", "8080")
@@ -108,13 +124,16 @@ func main() {
 	log.Printf("📱 Flutter can connect to: http://%s/api/v1", serverAddr)
 	log.Printf("🧹 Zone cleanup running every 5 minutes")
 	log.Printf("🛡️ Security middleware active - CONNECT attacks blocked")
+	if r2Client != nil {
+		log.Printf("🖼️  Media service active - R2 storage connected")
+	}
 
 	if err := router.Run(serverAddr); err != nil {
 		log.Fatalf("❌ Server failed to start: %v", err)
 	}
 }
 
-// 🛡️ NOVÉ: Initialize Redis connection
+// Initialize Redis connection
 func initRedis() *redis.Client {
 	redisAddr := getEnvVar("REDIS_ADDR", "localhost:6379")
 	redisPassword := getEnvVar("REDIS_PASSWORD", "")
@@ -140,7 +159,7 @@ func initRedis() *redis.Client {
 	return client
 }
 
-// ✅ NEW: Setup graceful shutdown
+// Setup graceful shutdown
 func setupGracefulShutdown() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -155,7 +174,7 @@ func setupGracefulShutdown() {
 			log.Println("✅ Zone cleanup scheduler stopped")
 		}
 
-		// 🛡️ NOVÉ: Close Redis connection
+		// Close Redis connection
 		if redisClient != nil {
 			redisClient.Close()
 			log.Println("✅ Redis connection closed")
@@ -298,7 +317,7 @@ func setDefaultEnvVars() {
 		"DB_SSLMODE":  "disable",
 		"DB_TIMEZONE": "UTC",
 
-		// 🛡️ NOVÉ: Redis defaults
+		// Redis defaults
 		"REDIS_ADDR":     "localhost:6379",
 		"REDIS_PASSWORD": "",
 
@@ -352,6 +371,12 @@ func printServerInfo(host, port string) {
 		}
 		return "❌"
 	}())
+	fmt.Printf("🖼️  R2 Storage:    %s\n", func() string {
+		if r2Client != nil {
+			return "✅ Connected"
+		}
+		return "❌ Disabled"
+	}())
 	fmt.Printf("🔑 JWT Configured: %s\n", func() string {
 		if len(jwtSecret) >= 32 {
 			return "✅ Yes"
@@ -359,11 +384,11 @@ func printServerInfo(host, port string) {
 		return "❌ No"
 	}())
 	fmt.Printf("🧹 Zone Cleanup:  ✅ Active (5min)\n")
-	fmt.Printf("🛡️ Security:      ✅ Active (CONNECT blocked)\n") // 🛡️ NOVÉ
+	fmt.Printf("🛡️ Security:      ✅ Active (CONNECT blocked)\n")
 	fmt.Printf("🚀 Status:        Ready for connections\n")
 	fmt.Println(separator)
 
-	// ✅ ENHANCED: Test endpoints with cleanup endpoints
+	// Test endpoints with cleanup endpoints
 	fmt.Println("\n🧪 TEST ENDPOINTS:")
 	fmt.Printf("Health:   GET  http://%s:%s/health\n", host, port)
 	fmt.Printf("Info:     GET  http://%s:%s/info\n", host, port)
@@ -378,7 +403,7 @@ func printServerInfo(host, port string) {
 	fmt.Printf("Expired Zones:  GET  http://%s:%s/api/v1/admin/zones/expired\n", host, port)
 	fmt.Printf("Zone Analytics: GET  http://%s:%s/api/v1/admin/analytics/zones\n", host, port)
 
-	// 🛡️ NOVÉ: Security info
+	// Security info
 	fmt.Println("\n🛡️ SECURITY STATUS:")
 	fmt.Println("• CONNECT attacks blocked automatically")
 	fmt.Println("• 4 IPs pre-blacklisted from recent attacks")

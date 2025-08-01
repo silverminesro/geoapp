@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"time"
 
 	"geoanomaly/internal/auth"
@@ -8,7 +9,7 @@ import (
 	"geoanomaly/internal/game"
 	"geoanomaly/internal/inventory"
 	"geoanomaly/internal/location"
-	"geoanomaly/internal/media" // 🆕 MEDIA - PRIDANE
+	"geoanomaly/internal/media"
 	"geoanomaly/internal/user"
 	"geoanomaly/pkg/middleware"
 
@@ -17,12 +18,12 @@ import (
 	"gorm.io/gorm"
 )
 
-func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
+func setupRoutes(db *gorm.DB, redisClient *redis.Client, r2Client *media.R2Client) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 
-	// 🛡️ NOVÉ: Security middleware PRVÝ (najdôležitejšie!)
+	// Security middleware PRVÝ (najdôležitejšie!)
 	if redisClient != nil {
 		router.Use(middleware.Security(redisClient))
 		router.Use(middleware.RateLimit(redisClient))
@@ -34,23 +35,22 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
 
+	// Initialize handlers
 	authHandler := auth.NewHandler(db, nil)
 	userHandler := user.NewHandler(db, nil)
 	gameHandler := game.NewHandler(db, nil)
 	locationHandler := location.NewHandler(db, nil)
 	inventoryHandler := inventory.NewHandler(db)
 
-	// 🆕 MEDIA - PRIDANE (Inicializácia)
-	mediaService, err := media.NewService(
-		getEnvVar("R2_ENDPOINT", "xxx.r2.cloudflarestorage.com"),
-		getEnvVar("R2_ACCESS_KEY", ""),
-		getEnvVar("R2_SECRET_KEY", ""),
-		getEnvVar("R2_BUCKET", "geoanomaly"),
-	)
-	if err != nil {
-		panic(err)
+	// Initialize media service and handler
+	var mediaHandler *media.Handler
+	if r2Client != nil {
+		mediaService := media.NewService(r2Client)
+		mediaHandler = media.NewHandler(mediaService)
+		log.Println("✅ Media handler initialized with R2 storage")
+	} else {
+		log.Println("⚠️  Media handler disabled (no R2 client)")
 	}
-	mediaHandler := media.NewHandler(mediaService)
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
@@ -58,6 +58,12 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		if redisClient != nil {
 			redisStatus = "connected"
 		}
+
+		r2Status := "disabled"
+		if r2Client != nil {
+			r2Status = "connected"
+		}
+
 		c.JSON(200, gin.H{
 			"status":     "healthy",
 			"timestamp":  time.Now().Format(time.RFC3339),
@@ -67,6 +73,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			"structure":  "unified",
 			"security":   "🛡️ active",
 			"redis":      redisStatus,
+			"r2_storage": r2Status,
 		})
 	})
 
@@ -178,7 +185,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			})
 		})
 
-		// ✅ NEW: Inventory test endpoint
+		// Inventory test endpoint
 		v1.GET("/inventory-test", func(c *gin.Context) {
 			var inventoryItems []common.InventoryItem
 			result := db.Limit(10).Find(&inventoryItems)
@@ -219,6 +226,11 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				redisStatus = "connected"
 			}
 
+			r2Status := "disabled"
+			if r2Client != nil {
+				r2Status = "connected"
+			}
+
 			c.JSON(200, gin.H{
 				"server": gin.H{
 					"status":      "running",
@@ -236,6 +248,10 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"redis": gin.H{
 					"status": redisStatus,
 				},
+				"r2_storage": gin.H{
+					"status": r2Status,
+					"bucket": getEnvVar("R2_BUCKET_NAME", ""),
+				},
 				"security": gin.H{
 					"connect_blocking": "active",
 					"rate_limiting":    "active",
@@ -247,7 +263,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 			})
 		})
 
-		// 🛡️ NOVÉ: Security status endpoint
+		// Security status endpoint
 		v1.GET("/security/status", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"security": gin.H{
@@ -268,14 +284,19 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 				"timestamp": time.Now().Format(time.RFC3339),
 			})
 		})
+	}
 
-		// 🆕 MEDIA ROUTES (Protected - JWT required)
+	// ==========================================
+	// 🆕 MEDIA ROUTES (Protected - JWT required)
+	// ==========================================
+	if mediaHandler != nil {
 		mediaRoutes := v1.Group("/media")
-		mediaRoutes.Use(middleware.JWTAuth())
+		mediaRoutes.Use(middleware.JWTAuth()) // 🔐 JWT required
 		{
-			mediaRoutes.GET("/:filename", mediaHandler.GetImage)
-			// ak chceš prefix /images, použi: mediaRoutes.GET("/images/:filename", mediaHandler.GetImage)
+			mediaRoutes.GET("/image/:filename", mediaHandler.GetImage)
+			mediaRoutes.GET("/artifact/:type", mediaHandler.GetArtifactImage)
 		}
+		log.Println("✅ Media routes registered: /api/v1/media/*")
 	}
 
 	// ==========================================
@@ -392,7 +413,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		adminRoutes.GET("/analytics/players", userHandler.GetPlayerAnalytics)
 		adminRoutes.GET("/analytics/items", gameHandler.GetItemAnalytics)
 
-		// 🛡️ NOVÉ: Security admin endpoints
+		// Security admin endpoints
 		securityRoutes := adminRoutes.Group("/security")
 		{
 			securityRoutes.GET("/blacklist", func(c *gin.Context) {
@@ -461,20 +482,31 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		})
 
 		systemRoutes.GET("/endpoints", func(c *gin.Context) {
+			mediaEndpoints := gin.H{}
+			if mediaHandler != nil {
+				mediaEndpoints = gin.H{
+					"GET /media/image/{filename}": "🖼️ Get image by filename",
+					"GET /media/artifact/{type}":  "🎨 Get artifact image by type",
+				}
+			}
+
 			c.JSON(200, gin.H{
 				"message":   "GeoAnomaly API Endpoints",
 				"version":   "1.0.0",
 				"structure": "unified",
 				"security":  "🛡️ CONNECT attacks blocked",
 				"endpoints": gin.H{
+					"media": mediaEndpoints,
 					"inventory": gin.H{
-						"GET /inventory/items":     "🎒 Get user inventory (FIXED)",
-						"GET /inventory/summary":   "📊 Get inventory summary",
-						"DELETE /inventory/{id}":   "🗑️ Delete inventory item",
-						"POST /inventory/{id}/use": "⚡ Use inventory item (planned)",
+						"GET /inventory/items":         "🎒 Get user inventory (with images)",
+						"GET /inventory/summary":       "📊 Get inventory summary",
+						"DELETE /inventory/{id}":       "🗑️ Delete inventory item",
+						"POST /inventory/{id}/use":     "⚡ Use inventory item",
+						"PUT /inventory/{id}/favorite": "⭐ Set favorite item",
+						"PUT /inventory/{id}/equip":    "⚔️ Equip item",
 					},
 					"security": gin.H{
-						"GET /api/v1/security/status":        "🛡️ Security status",
+						"GET /security/status":               "🛡️ Security status",
 						"GET /admin/security/blacklist":      "🚫 View blacklist",
 						"POST /admin/security/blacklist/*":   "➕ Add to blacklist",
 						"DELETE /admin/security/blacklist/*": "➖ Remove from blacklist",
@@ -504,6 +536,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		})
 	}
 
+	// 404 handler
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(404, gin.H{
 			"error":     "Endpoint not found",
@@ -516,6 +549,7 @@ func setupRoutes(db *gorm.DB, redisClient *redis.Client) *gin.Engine {
 		})
 	})
 
+	// 405 handler
 	router.NoMethod(func(c *gin.Context) {
 		c.JSON(405, gin.H{
 			"error":   "Method not allowed",
