@@ -1,52 +1,80 @@
-// internal/media/service.go
 package media
 
 import (
 	"context"
 	"fmt"
-
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	"gorm.io/gorm"
+	"io"
+	"time"
 )
 
 type Service struct {
-	client     *minio.Client
-	bucketName string
-	db         *gorm.DB // 🆕 Pridaj DB connection
+	r2Client *R2Client
+	cache    map[string]cachedImage // Jednoduchý in-memory cache
 }
 
-func NewService(endpoint, accessKey, secretKey, bucketName string, db *gorm.DB) (*Service, error) {
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: true,
-	})
-	if err != nil {
-		return nil, err
-	}
+type cachedImage struct {
+	data        []byte
+	contentType string
+	cachedAt    time.Time
+}
+
+func NewService(r2Client *R2Client) *Service {
 	return &Service{
-		client:     client,
-		bucketName: bucketName,
-		db:         db, // 🆕
-	}, nil
+		r2Client: r2Client,
+		cache:    make(map[string]cachedImage),
+	}
 }
 
-func (s *Service) GetObject(ctx context.Context, objectName string) (*minio.Object, error) {
-	return s.client.GetObject(ctx, s.bucketName, objectName, minio.GetObjectOptions{})
-}
-
-// 🆕 User ownership validation
-func (s *Service) UserOwnsArtifact(userID interface{}, artifactType string) bool {
-	var count int64
-	err := s.db.Table("inventory_items").
-		Where("user_id = ? AND item_type = 'artifact' AND deleted_at IS NULL", userID).
-		Where("properties->>'type' = ?", artifactType).
-		Count(&count)
-
-	if err != nil {
-		fmt.Printf("❌ Error checking artifact ownership: %v\n", err)
-		return false
+// GetArtifactImageData získa dáta obrázka pre daný typ artefaktu
+func (s *Service) GetArtifactImageData(ctx context.Context, artifactType string) ([]byte, string, error) {
+	filename, exists := s.GetArtifactImage(artifactType)
+	if !exists {
+		return nil, "", fmt.Errorf("artifact type not found: %s", artifactType)
 	}
 
-	return count > 0
+	return s.GetImageData(ctx, filename)
+}
+
+// GetImageData získa dáta obrázka z R2 (s cache)
+func (s *Service) GetImageData(ctx context.Context, filename string) ([]byte, string, error) {
+	// Skontroluj cache (30 minút)
+	if cached, ok := s.cache[filename]; ok {
+		if time.Since(cached.cachedAt) < 30*time.Minute {
+			return cached.data, cached.contentType, nil
+		}
+		delete(s.cache, filename) // Vymaž expirovanú cache
+	}
+
+	// Stiahni z R2
+	key := fmt.Sprintf("artifacts/%s", filename)
+	body, contentType, err := s.r2Client.GetObject(ctx, key)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get image from R2: %w", err)
+	}
+	defer body.Close()
+
+	// Prečítaj dáta
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read image data: %w", err)
+	}
+
+	// Ulož do cache
+	s.cache[filename] = cachedImage{
+		data:        data,
+		contentType: contentType,
+		cachedAt:    time.Now(),
+	}
+
+	return data, contentType, nil
+}
+
+// CleanupCache vyčistí expirované položky z cache
+func (s *Service) CleanupCache() {
+	now := time.Now()
+	for filename, cached := range s.cache {
+		if now.Sub(cached.cachedAt) > 30*time.Minute {
+			delete(s.cache, filename)
+		}
+	}
 }
