@@ -1,7 +1,10 @@
 package inventory
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -162,48 +165,78 @@ func (h *Handler) GetItemDetail(c *gin.Context) {
 		return
 	}
 
-	// Get item as map to handle JSONB
-	var rawItem map[string]interface{}
-	if err := h.db.Table("inventory_items").Where("id = ? AND user_id = ? AND deleted_at IS NULL", itemUUID, userID).First(&rawItem).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+	// ✅ FIX: Use raw SQL query to avoid GORM model issues
+	var id, userIDResult, itemType, itemIDResult string
+	var quantity int
+	var propertiesJSON string
+	var createdAt, updatedAt time.Time
+	var deletedAt sql.NullTime
+
+	query := `
+		SELECT 
+			id, user_id, item_type, item_id, quantity, 
+			properties::text, created_at, updated_at, deleted_at
+		FROM inventory_items 
+		WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+	`
+
+	err = h.db.Raw(query, itemUUID, userID).Row().Scan(
+		&id, &userIDResult, &itemType, &itemIDResult,
+		&quantity, &propertiesJSON, &createdAt, &updatedAt, &deletedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+			return
+		}
+		log.Printf("Database error in GetItemDetail: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Database error",
+			"details": err.Error(),
+		})
 		return
 	}
 
-	// Build response with all details
-	response := gin.H{
-		"id":         rawItem["id"],
-		"user_id":    rawItem["user_id"],
-		"item_type":  rawItem["item_type"],
-		"item_id":    rawItem["item_id"],
-		"quantity":   rawItem["quantity"],
-		"created_at": rawItem["created_at"],
+	// Parse properties JSON
+	var properties map[string]interface{}
+	if err := json.Unmarshal([]byte(propertiesJSON), &properties); err != nil {
+		log.Printf("Failed to parse properties JSON: %v", err)
+		log.Printf("Raw properties: %s", propertiesJSON)
+		properties = make(map[string]interface{})
 	}
 
-	// Handle properties and add image URL
-	if props, ok := rawItem["properties"].(map[string]interface{}); ok {
-		response["properties"] = props
+	// Build response
+	response := gin.H{
+		"id":         id,
+		"user_id":    userIDResult,
+		"item_type":  itemType,
+		"item_id":    itemIDResult,
+		"quantity":   quantity,
+		"properties": properties,
+		"created_at": createdAt,
+		"updated_at": updatedAt,
+	}
 
-		// Extract common fields
-		if name, ok := props["name"].(string); ok {
-			response["name"] = name
-		}
-		if desc, ok := props["description"].(string); ok {
-			response["description"] = desc
-		}
-		if rarity, ok := props["rarity"].(string); ok {
-			response["rarity"] = rarity
-		}
+	// Extract common fields from properties
+	if name, ok := properties["name"].(string); ok {
+		response["name"] = name
+	}
+	if desc, ok := properties["description"].(string); ok {
+		response["description"] = desc
+	}
+	if rarity, ok := properties["rarity"].(string); ok {
+		response["rarity"] = rarity
+	}
 
-		// Add image URL
-		itemTypeStr, _ := rawItem["item_type"].(string)
-		if itemTypeStr == "artifact" {
-			if artifactType, exists := props["type"].(string); exists {
-				response["image_url"] = fmt.Sprintf("/api/v1/media/artifact/%s", artifactType)
-			}
-		} else if itemTypeStr == "gear" {
-			if gearType, exists := props["type"].(string); exists {
-				response["image_url"] = fmt.Sprintf("/api/v1/media/gear/%s", gearType)
-			}
+	// Add image URL based on item type
+	if itemType == "artifact" {
+		if artifactType, exists := properties["type"].(string); exists {
+			response["image_url"] = fmt.Sprintf("/api/v1/media/artifact/%s", artifactType)
+		}
+	} else if itemType == "gear" {
+		if gearType, exists := properties["type"].(string); exists {
+			response["image_url"] = fmt.Sprintf("/api/v1/media/gear/%s", gearType)
 		}
 	}
 
