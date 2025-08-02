@@ -29,6 +29,13 @@ var (
 	r2Client    *media.R2Client // Pridané pre R2
 )
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func init() {
 	startTime = time.Now()
 
@@ -84,9 +91,10 @@ func main() {
 	log.Println("✅ Database migrations status verified")
 
 	// Initialize R2 client
+	// Initialize R2 client
 	log.Println("🖼️  Initializing Cloudflare R2 client...")
 
-	// ✅ PRIDANÉ: Debug R2 credentials
+	// ✅ PRIDANÉ: Debug R2 credentials (bezpečne)
 	accountID := getEnvVar("R2_ACCOUNT_ID", "")
 	accessKeyID := getEnvVar("R2_ACCESS_KEY_ID", "")
 	secretAccessKey := getEnvVar("R2_SECRET_ACCESS_KEY", "")
@@ -94,7 +102,11 @@ func main() {
 
 	log.Printf("🔑 R2_ACCOUNT_ID: %s", accountID)
 	log.Printf("🔑 R2_ACCESS_KEY_ID: %s", accessKeyID)
-	log.Printf("🔑 R2_SECRET_ACCESS_KEY: %s...", secretAccessKey[:10])
+	if len(secretAccessKey) > 0 {
+		log.Printf("🔑 R2_SECRET_ACCESS_KEY: %s... (length: %d)", secretAccessKey[:min(10, len(secretAccessKey))], len(secretAccessKey))
+	} else {
+		log.Printf("🔑 R2_SECRET_ACCESS_KEY: <EMPTY>")
+	}
 	log.Printf("🔑 R2_BUCKET_NAME: %s", bucketName)
 
 	if accountID == "" || accessKeyID == "" || secretAccessKey == "" {
