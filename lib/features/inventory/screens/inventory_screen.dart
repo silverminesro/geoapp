@@ -5,6 +5,7 @@ import '../models/inventory_models.dart';
 import '../widgets/inventory_item_card.dart';
 import '../widgets/player_stats_card.dart';
 import 'item_detail_screen.dart';
+import '../../core/services/auth_service.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -81,6 +82,25 @@ class _InventoryScreenState extends State<InventoryScreen>
           IconButton(
             onPressed: _loadInventory,
             icon: const Icon(Icons.refresh),
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'logout') {
+                _logout();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(Icons.logout),
+                    SizedBox(width: 8),
+                    Text('Logout'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -263,5 +283,14 @@ class _InventoryScreenState extends State<InventoryScreen>
         builder: (context) => ItemDetailScreen(item: item),
       ),
     );
+  }
+
+  Future<void> _logout() async {
+    final authService = context.read<AuthService>();
+    await authService.logout();
+    
+    if (mounted) {
+      Navigator.of(context).pushReplacementNamed('/login');
+    }
   }
 }

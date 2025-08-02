@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../constants.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:8080/api/v1';
   String? _token;
 
   void setToken(String token) {
@@ -16,7 +16,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> login(String username, String password) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/auth/login'),
+      Uri.parse('${AppConstants.apiBaseUrl}/auth/login'),
       headers: _headers,
       body: jsonEncode({
         'username': username,
@@ -35,7 +35,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getUserProfile() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/user/profile'),
+      Uri.parse('${AppConstants.apiBaseUrl}/user/profile'),
       headers: _headers,
     );
 
@@ -57,7 +57,7 @@ class ApiService {
       if (type != null) 'type': type,
     };
 
-    final uri = Uri.parse('$baseUrl/user/inventory').replace(
+    final uri = Uri.parse('${AppConstants.apiBaseUrl}/user/inventory').replace(
       queryParameters: queryParams,
     );
 
@@ -72,7 +72,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getLevelDefinitions() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/user/levels'),
+      Uri.parse('${AppConstants.apiBaseUrl}/user/levels'),
       headers: _headers,
     );
 
@@ -84,7 +84,6 @@ class ApiService {
   }
 
   String getImageUrl(String itemType, String itemId) {
-    // Assuming Cloudflare R2 URL pattern
-    return 'https://your-cloudflare-domain.com/images/$itemType/$itemId.png';
+    return AppConstants.getImageUrl(itemType, itemId);
   }
 }
