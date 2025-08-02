@@ -1,5 +1,7 @@
 package media
 
+import "log"
+
 // Mapuje artifactType na image filename
 var ArtifactImages = map[string]string{
 
@@ -7,7 +9,7 @@ var ArtifactImages = map[string]string{
 	"mushroom_sample": "mutant_mushroom_sample.jpg",
 	"tree_resin":      "amber_tree_resin.jpg",
 	"animal_bones":    "predator_bones.jpg",
-	"herbal_extract":  "healing_herb_extract.jpg",
+	"herbal_extract":  "herbal_extract.jpg",
 	"dewdrop_pearl":   "dewdrop_pearl.jpg",
 
 	// Mountain artifacts - generovane: mysterious and atmospheric, highly detailed, inspired by S.T.A.L.K.E.R. games, no people
@@ -41,5 +43,10 @@ var ArtifactImages = map[string]string{
 
 func (s *Service) GetArtifactImage(artifactType string) (string, bool) {
 	filename, exists := ArtifactImages[artifactType]
+
+	// ✅ PRIDANÉ: Debug logging
+	log.Printf("🔍 GetArtifactImage: type='%s', filename='%s', exists=%v",
+		artifactType, filename, exists)
+
 	return filename, exists
 }

@@ -2,6 +2,7 @@ package media
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -30,15 +31,25 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) GetArtifactImage(c *gin.Context) {
 	artifactType := c.Param("type")
 
+	// ✅ PRIDANÉ: Debug logging
+	log.Printf("🖼️ GetArtifactImage called with type: %s", artifactType)
+	log.Printf("🔍 Request URL: %s", c.Request.URL.Path)
+	log.Printf("🔍 Request method: %s", c.Request.Method)
+	log.Printf("🔑 Authorization header present: %v", c.GetHeader("Authorization") != "")
+
 	// Získaj dáta obrázka
 	imageData, contentType, err := h.service.GetArtifactImageData(c.Request.Context(), artifactType)
 	if err != nil {
+		log.Printf("❌ Failed to get image data: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Artifact image not found",
-			"type":  artifactType,
+			"error":   "Artifact image not found",
+			"type":    artifactType,
+			"details": err.Error(),
 		})
 		return
 	}
+
+	log.Printf("✅ Image data retrieved: %d bytes, type: %s", len(imageData), contentType)
 
 	// Nastav cache headers pre browser
 	c.Header("Cache-Control", "public, max-age=3600") // 1 hodina
@@ -46,10 +57,12 @@ func (h *Handler) GetArtifactImage(c *gin.Context) {
 
 	// Skontroluj If-None-Match header
 	if match := c.GetHeader("If-None-Match"); match == fmt.Sprintf(`"%s"`, artifactType) {
+		log.Printf("📄 Returning 304 Not Modified")
 		c.Status(http.StatusNotModified)
 		return
 	}
 
+	log.Printf("✅ Sending image: %d bytes", len(imageData))
 	// Pošli obrázok
 	c.Data(http.StatusOK, contentType, imageData)
 }
