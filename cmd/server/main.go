@@ -85,18 +85,30 @@ func main() {
 
 	// Initialize R2 client
 	log.Println("🖼️  Initializing Cloudflare R2 client...")
-	r2Client, err = media.NewR2Client(
-		getEnvVar("R2_ACCOUNT_ID", ""),
-		getEnvVar("R2_ACCESS_KEY_ID", ""),
-		getEnvVar("R2_SECRET_ACCESS_KEY", ""),
-		getEnvVar("R2_BUCKET_NAME", "geoanomaly-artifacts"),
-	)
-	if err != nil {
-		log.Printf("⚠️  Failed to initialize R2 client: %v", err)
-		log.Println("⚠️  Media service will be disabled")
+
+	// ✅ PRIDANÉ: Debug R2 credentials
+	accountID := getEnvVar("R2_ACCOUNT_ID", "")
+	accessKeyID := getEnvVar("R2_ACCESS_KEY_ID", "")
+	secretAccessKey := getEnvVar("R2_SECRET_ACCESS_KEY", "")
+	bucketName := getEnvVar("R2_BUCKET_NAME", "geoanomaly-artifacts")
+
+	log.Printf("🔑 R2_ACCOUNT_ID: %s", accountID)
+	log.Printf("🔑 R2_ACCESS_KEY_ID: %s", accessKeyID)
+	log.Printf("🔑 R2_SECRET_ACCESS_KEY: %s...", secretAccessKey[:10])
+	log.Printf("🔑 R2_BUCKET_NAME: %s", bucketName)
+
+	if accountID == "" || accessKeyID == "" || secretAccessKey == "" {
+		log.Println("❌ Missing R2 credentials in environment variables")
 		r2Client = nil
 	} else {
-		log.Println("✅ R2 client initialized successfully")
+		r2Client, err = media.NewR2Client(accountID, accessKeyID, secretAccessKey, bucketName)
+		if err != nil {
+			log.Printf("⚠️  Failed to initialize R2 client: %v", err)
+			log.Println("⚠️  Media service will be disabled")
+			r2Client = nil
+		} else {
+			log.Println("✅ R2 client initialized successfully")
+		}
 	}
 
 	// Start zone cleanup scheduler
